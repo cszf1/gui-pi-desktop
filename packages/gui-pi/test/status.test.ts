@@ -57,3 +57,10 @@ test("after an unknown outcome GUI actions are held until a window read", () => 
 test("authorisation tools of an old gate are never registered", () => {
   for (const t of ["gate_confirm", "gate_task", "gate_config"]) assert.ok(HIDDEN_GATE_TOOLS.has(t));
 });
+
+test("gate v0.10.0 human_outcome words map to the shown reason", () => {
+  const m: Record<string, string> = { declined: "declined", denied: "declined", cancelled: "cancelled", timeout: "timed_out",
+    no_response: "timed_out", window_closed: "closed", channel_unavailable: "unavailable", unattended: "unavailable" };
+  for (const [k, v] of Object.entries(m)) assert.equal(humanOutcome({ human_outcome: k }, ""), v, k);
+  assert.equal(humanOutcome({ human_outcome: "accepted" }, ""), null);
+});

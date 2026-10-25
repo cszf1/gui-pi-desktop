@@ -33,9 +33,9 @@ function normHuman(v: any): HumanOutcome | null {
   if (!s || s === "accept" || s === "accepted" || s === "allow" || s === "done") return null;
   if (s.startsWith("declin") || s === "deny" || s === "denied" || s === "no") return "declined";
   if (s.startsWith("cancel")) return "cancelled";
-  if (s.startsWith("time") || s === "expired") return "timed_out";
-  if (s.startsWith("clos")) return "closed";
-  if (s.startsWith("unavail") || s === "none" || s === "nobody") return "unavailable";
+  if (s.startsWith("time") || s === "expired" || s === "no_response") return "timed_out";
+  if (s.includes("clos")) return "closed"; // gate: window_closed
+  if (s.includes("unavail") || s === "unattended" || s === "none" || s === "nobody") return "unavailable"; // gate: channel_unavailable, unattended
   return "declined";
 }
 

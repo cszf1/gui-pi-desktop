@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.2.0) — 2026-10-25
+## 0.2.0 — 2026-10-25 (gui-gate v0.10.0)
 
 按外部审阅（桌面版、上下文、问人部分）修订。兼容当前 gui-gate（status executed / blocked / partial / done）和正在改的新 gate（diff 结构、status unknown / input_required、human_outcome、移除 gate_confirm、gate_task 不再授权）。
 
