@@ -109,6 +109,8 @@ function renderChecks(c) {
   }
 }
 document.getElementById("recheck").onclick = async () => { renderChecks(await invoke("self_check")); };
+// the startup checks finish after this page may have opened: redraw only the checks (never the form being edited)
+window.__TAURI__.event.listen("checks_done", async () => { const s = await invoke("get_settings"); if (state) state.checks = s.checks; renderChecks(s.checks || {}); });
 // redraw=false (Test connection): keep the form as it is (its values are what was just saved) and update only the
 // problem list, so a result written into the form is not thrown away.
 async function save(redraw = true) {

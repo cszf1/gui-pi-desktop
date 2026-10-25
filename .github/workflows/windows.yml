@@ -9,7 +9,7 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # set to the gui-gate main commit the app ships (see linux.yml)
+  GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # gui-gate main dafb126 (same commit in linux.yml / macos.yml)
   PYTHON: python
   GUI_GATE_DIALOG: none  # tests answer person requests through the client (MRTR) or --human: never a real PowerShell dialog
 permissions: {contents: write}
@@ -37,33 +37,28 @@ jobs:
         working-directory: gate
         env: {RUSTFLAGS: "-C target-feature=+crt-static"}
         run: cargo test --release
-      - if: ${{ !cancelled() }}
-        name: gui-gate fake_driver end-to-end (every gate return action, MRTR person requests) + security / meta suites
+      - name: gui-gate fake_driver end-to-end (every gate return action, MRTR person requests) + security / meta suites
         working-directory: gate
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
         timeout-minutes: 40
         run: python -u -m unittest tests.test_actions_e2e tests.test_security_e2e tests.test_mcp_meta -v
-      - if: ${{ !cancelled() }}
-        name: gui-gate full python suite (informational on Windows - see docs/test-log.md for which tests are bash-only)
+      - name: gui-gate full python suite (informational on Windows - bash/run_command and bench tests are Linux-only; see docs/test-log.md)
         working-directory: gate
         continue-on-error: true
         timeout-minutes: 60
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
         run: python -u -m unittest discover -s tests -v
-      - if: ${{ !cancelled() }}
-        name: extension tests (incl. E2E-ext against the real gui-gate.exe + fake driver)
+      - name: extension tests (incl. E2E-ext against the real gui-gate.exe + fake driver)
         working-directory: packages/gui-pi
         env: {GUI_GATE_BIN: "${{ github.workspace }}/gate/target/release/gui-gate.exe", GUI_GATE_SRC: "${{ github.workspace }}/gate"}
         run: node --test test/*.test.ts
-      - if: ${{ !cancelled() }}
-        name: shell core tests (Job Object Stop, env allowlist without case, self-check)
+      - name: shell core tests (Job Object Stop, env allowlist without case, self-check)
         working-directory: desktop
         env: {GPD_DUMP_MODELS_JSON: "${{ runner.temp }}/models.json"}
         run: cargo test -p gpd-core
 
   bundle:
     needs: test
-    if: ${{ !cancelled() }}  # DEV: bundle even when a test step failed (reverted before merging)
     runs-on: windows-latest
     strategy:
       fail-fast: false
