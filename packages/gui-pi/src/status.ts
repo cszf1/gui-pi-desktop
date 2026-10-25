@@ -92,7 +92,9 @@ export function interpret(name: string, params: any, r: { content?: any[]; isErr
       "Look at the current window, reconsider what the user asked, and generate a new next action.]");
   }
   if (human) {
-    notes.push(`[client: the person ${HUMAN_LABEL[human]}. That counts as a no: the step was refused. ` +
+    notes.push((human === "declined"
+      ? `[client: the person declined. That is a no: the step was NOT done. `
+      : `[client: the person ${HUMAN_LABEL[human]}. No answer is not a refusal by the person, but the step was NOT done. `) +
       "Do not ask again for the same thing right away and do not try the same effect another way; take a safe way or stop and report.]");
   }
   const refused = (status === "blocked" || status === "input_required") && (!!human || /refus|declin|reviewer|risk|denied/i.test(text));

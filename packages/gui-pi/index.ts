@@ -230,7 +230,7 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         if (name === "set_plan") plan.update(params);
         let changed = false;
         if (st.refused) changed = facts.addRefused(refusedEffect(name, sc, text)) || changed;
-        if (st.human) changed = facts.addAnswer(`${sc?.human_outcome?.kind || name}: the person ${HUMAN_LABEL[st.human]} (refused)`) || changed;
+        if (st.human) changed = facts.addAnswer(`${sc?.human_outcome?.kind || name}: the person ${HUMAN_LABEL[st.human]} (${st.human === "declined" ? "refused" : "no answer"}; not done)`) || changed;
         if (st.byPerson) changed = facts.addAnswer(`${name}: a person did this step themselves (do not repeat it)`) || changed;
         if (typeof sc.answer === "string" && sc.answer.trim()) changed = facts.addAnswer(`answered: ${sc.answer}`) || changed;
         else if (text.startsWith("[human via")) changed = facts.addAnswer(text.split("\n")[0]) || changed;

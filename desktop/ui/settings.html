@@ -7,7 +7,7 @@
 <fieldset><legend>Main model (required)</legend><div id="main"></div></fieldset>
 <fieldset><legend>Reviewer model (required - checks risky and doubtful steps; cannot be turned off)</legend><div id="reviewer"></div></fieldset>
 <fieldset><legend>Person</legend><div class="row"><label>Answer within (s)</label><input id="timeout" type="number" min="30"></div>
-<div class="muted">No answer in time, a closed question or a cancelled one counts as "no".</div></fieldset>
+<div class="muted">No answer in time, a closed question or a cancelled one is "no answer": not a refusal, but the step is not done.</div></fieldset>
 <details id="advanced"><summary>Advanced: optional gate roles</summary>
 <div class="muted">Each role is off unless you turn it on. "Main model" uses the main model's endpoint, model and key;
 "Same as reviewer" uses the reviewer's. A custom endpoint may leave any field empty: empty fields (and a missing key) inherit the main model.</div>

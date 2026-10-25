@@ -234,7 +234,9 @@ fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> Outcome {
     let takeover = ty == "takeover" || ty == "help";
     let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .title(match ty { "approve" => "Approve this step?", "clarify" => "A question for you", "takeover" => "Your turn", _ => "The agent is stuck" })
-        .inner_size(480.0, if takeover { 300.0 } else { 320.0 })
+        // a first guess only: the popup measures its own content and calls popup_fit (round 1: the takeover popup
+        // at a fixed 300 px cut off its countdown line)
+        .inner_size(480.0, if takeover { 420.0 } else { 380.0 })
         .always_on_top(true).focused(true).resizable(false)
         .build();
     let win = match built {
@@ -296,6 +298,18 @@ fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> Outcome {
 
 fn urlencode(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// The popup asks for the height its content needs (CSS px); clamped to 160 px .. the monitor's height less 80 px.
+/// Width stays 480. A takeover / help popup stays in the top right corner.
+#[tauri::command]
+fn popup_fit(window: tauri::WebviewWindow, height: f64) -> bool {
+    if !window.label().starts_with("popup-") || !height.is_finite() {
+        return false;
+    }
+    let max = window.current_monitor().ok().flatten()
+        .map(|m| m.size().height as f64 / m.scale_factor() - 80.0).unwrap_or(720.0).max(200.0);
+    window.set_size(tauri::LogicalSize::new(480.0, height.clamp(160.0, max))).is_ok()
 }
 
 /// The popup's buttons call this. Only the first answer for a popup counts.
@@ -631,7 +645,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, set_key, use_memory_keys, test_model, popup_answer,
+        .invoke_handler(tauri::generate_handler![get_settings, save_settings, set_key, use_memory_keys, test_model, popup_answer, popup_fit,
                                                  start_task, send_message, restart_task, stop_task, open_settings, self_check])
         .build(tauri::generate_context!())
         .expect("error while building gui-pi-desktop");

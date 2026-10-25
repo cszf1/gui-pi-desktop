@@ -83,7 +83,8 @@ fn human_word(h: &str) -> &'static str {
         "timed_out" => "timed out",
         "closed" => "window closed",
         "unavailable" => "unavailable",
-        _ => "refused",
+        "expired" => "expired",
+        _ => "not done",
     }
 }
 
@@ -122,7 +123,13 @@ pub fn ui_event(line: &str) -> Option<UiEvent> {
                 _ => {}
             }
             if let Some(h) = &human {
-                shown = format!("person: {} (refused). {shown}", human_word(h));
+                // gate no_answer semantics: only "declined" is the person saying no; a timeout, a closed or cancelled
+                // question is no answer - not a refusal, but the step is still not done
+                shown = if h == "declined" {
+                    format!("person: declined - the step was not done. {shown}")
+                } else {
+                    format!("person: no answer ({}) - not a refusal; the step was not done. {shown}", human_word(h))
+                };
             }
             Some(UiEvent { kind: if gate_kind { "gate".into() } else { "result".into() }, text: shown, image: first_image(c), status, human, ..Default::default() })
         }
@@ -204,7 +211,8 @@ mod tests {
     fn statuses_and_person_outcomes_in_the_timeline() {
         let e = ui_event(r#"{"type":"tool_execution_end","toolName":"click","result":{"content":[{"type":"text","text":"[gate] Not executed: risky"}],"details":{"status":"blocked","human_outcome":"timed_out"}}}"#).unwrap();
         assert_eq!((e.kind.as_str(), e.human.as_deref()), ("gate", Some("timed_out")));
-        assert!(e.text.starts_with("person: timed out (refused)"), "{}", e.text);
+        assert!(e.text.starts_with("person: no answer (timed out) - not a refusal; the step was not done"), "{}", e.text);
+        assert!(!e.text.contains("refused)"), "{}", e.text);
         for (h, w) in [("declined", "declined"), ("cancelled", "cancelled"), ("closed", "window closed"), ("unavailable", "unavailable")] {
             let line = format!(r#"{{"type":"tool_execution_end","result":{{"content":[],"details":{{"status":"blocked","human_outcome":"{h}"}}}}}}"#);
             assert!(ui_event(&line).unwrap().text.contains(w));

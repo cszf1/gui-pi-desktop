@@ -280,7 +280,10 @@ impl Metrics {
     }
     pub fn record(&mut self, kind: &str, message: &str, meta: &Value, o: &Outcome, secs: f64) -> QuestionRec {
         let ty = type_of(kind).to_string();
-        let repeated = !self.seen.insert(Metrics::key(&ty, message));
+        // a question that expired in the queue was never seen by the person: it does not make the next identical
+        // question a repeat (round 1 marked it so); it is itself a repeat only of one that was shown
+        let key = Metrics::key(&ty, message);
+        let repeated = if matches!(o, Outcome::Expired) { self.seen.contains(&key) } else { !self.seen.insert(key) };
         let (word, refused) = label(kind, o);
         let takeover_steps = if ty == "takeover" { strs(meta.get("steps").or(meta.get("todo")), 50).len().max(1) } else { 0 };
         let r = QuestionRec { ty, outcome: word.into(), refused, secs: (secs * 10.0).round() / 10.0, repeated, takeover_steps };
@@ -900,6 +903,17 @@ mod tests {
         assert_eq!((e["outcome"].as_str(), e["refused"].as_bool(), e["shown"].as_bool()), (Some("expired"), Some(true), Some(false)));
         let n = shown.lock().unwrap();
         assert_eq!((n.len(), n[0]["outcome"].as_str()), (1, Some("expired")));
+    }
+
+    #[test]
+    fn an_expired_question_does_not_make_the_next_same_question_a_repeat() {
+        let mut m = Metrics::new("t");
+        let meta = json!({});
+        assert!(!m.record("help", "Stuck on the dialog", &meta, &Outcome::Expired, 0.0).repeated);
+        assert!(!m.record("help", "Stuck on the dialog", &meta, &Outcome::Yes, 2.0).repeated, "the first one was never shown");
+        assert!(m.record("help", "Stuck on the dialog", &meta, &Outcome::Expired, 0.0).repeated, "this one was shown before");
+        assert!(m.record("help", "stuck on the dialog!", &meta, &Outcome::No("x".into()), 1.0).repeated);
+        assert_eq!(m.summary("finished")["repeated"], 2);
     }
 
     #[cfg(unix)]

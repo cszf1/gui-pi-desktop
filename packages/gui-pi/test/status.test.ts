@@ -26,7 +26,9 @@ test("person outcomes: every reason is a refusal; old text still understood", ()
     const i = interpret("click", {}, R({ status: "blocked", human_outcome: v }, "[gate] Not executed", true));
     assert.equal(i.human, want);
     assert.equal(i.refused, true);
-    assert.match(i.notes.join(), /counts as a no/);
+    assert.match(i.notes.join(), /step was NOT done/);
+    if (want === "declined") assert.match(i.notes.join(), /That is a no/);
+    else assert.match(i.notes.join(), /No answer is not a refusal by the person/);
   }
   assert.equal(humanOutcome({}, "[gate] Not executed: the person did not answer within 120 s"), "timed_out");
   assert.equal(humanOutcome({ human_outcome: "accept" }, ""), null);

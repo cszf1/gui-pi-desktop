@@ -70,7 +70,7 @@ listen("human", (e) => {
   const p = e.payload;
   const noAnswer = ["timed out", "expired", "window closed", "cancelled", "unavailable"].includes(p.outcome);
   const why = p.outcome === "expired" ? " (never shown: another question was open)" : "";
-  add("human" + (p.refused ? " refused" : ""), `asked the person (${p.kind}): ${p.outcome}${why}${noAnswer ? " - no answer, nothing was done" : p.refused ? " - counts as a refusal" : ""}`);
+  add("human" + (noAnswer ? " muted" : p.refused ? " refused" : ""), `asked the person (${p.kind}): ${noAnswer ? "no answer (" + p.outcome + ")" : p.outcome}${why}${noAnswer ? " - not a refusal; the step was not done" : p.refused ? " - the step was not done" : ""}`);
 });
 window.addEventListener("focus", refresh);
 // B10: saved settings and the finished start-up checks update the "before you start" list right away

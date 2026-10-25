@@ -3,7 +3,8 @@
 //   clarify   the question, each option with how it changes what happens next; or free text; Don't answer
 //   takeover  the minimal steps for the person; the agent's input is paused; Done never re-runs the action
 //   help      what the agent tried; "Give a hint" (text) / "I did it for you"
-// No answer before the bar runs out = timed out; closing the window = cancelled. Both are refusals.
+// No answer before the bar runs out = timed out; closing the window = cancelled. Both are "no answer": not a refusal
+// by the person, but the step is still not done.
 // Only the first answer counts (the shell ignores any later one).
 const { invoke } = window.__TAURI__.core;
 const q = JSON.parse(decodeURIComponent(location.hash.slice(1)));
@@ -63,12 +64,23 @@ if (v.type === "approve") {
   button("Give a hint", "", () => send("no", text.value));
   button("I did it for you", "primary", () => send("yes"));
 }
+// what happens when nobody answers (gate: no_answer). Not a refusal by the person; the step is still not done.
+const NO_ANSWER = {
+  approve: "if nobody answers, the step is not done",
+  clarify: "if nobody answers, nothing is chosen and the step is not done",
+  takeover: "if nobody answers, the step stays undone",
+  help: "if nobody answers, the agent gets no help and does not go on with this step",
+};
 const total = Math.max(1, Number(q.seconds) || 120);
 const t0 = Date.now();
 const tick = () => {
   const left = Math.max(0, total - (Date.now() - t0) / 1000);
   $("bar").style.width = (100 * left / total) + "%";
-  $("left").textContent = `${Math.ceil(left)} s left - no answer counts as "no"`;
+  $("left").textContent = `${Math.ceil(left)} s left - ${NO_ANSWER[v.type] || NO_ANSWER.approve}`;
   if (left <= 0) send("timeout"); else if (!sent) setTimeout(tick, 500);
 };
 tick();
+
+// size the window to its content (the shell clamps it to the screen); again when fonts / layout settle
+const fit = () => invoke("popup_fit", { height: Math.ceil(document.querySelector(".pop").getBoundingClientRect().height) + 4 }).catch(() => {});
+fit(); window.addEventListener("load", fit); setTimeout(fit, 300);
