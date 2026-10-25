@@ -1,6 +1,6 @@
 //! packaging/linux scripts: the uninstall path list is the app's own and nothing else (a pre-existing Cua Driver
 //! and user data survive a real run); the AppImage update keeps the previous version and refuses unverified files.
-#![cfg(unix)]
+#![cfg(target_os = "linux")] // packaging/linux scripts (sha256sum, XDG paths): Linux packages only
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
