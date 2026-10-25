@@ -9,7 +9,7 @@ on:
       test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
 env:
   GATE_REF: 367d3f9102ca968b2c77fbec2b2e78f179eb7ef4  # gui-gate main: P0 fixes + allowlisted child env
-permissions: {contents: read}
+permissions: {contents: write}
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -56,3 +56,12 @@ jobs:
             desktop/target/release/bundle/appimage/*.AppImage
             desktop/target/release/bundle/deb/*.deb
             dist/resources/SHA256SUMS
+      - name: publish a prerelease (main pushes and manual runs), so a test box can fetch it without a login
+        if: github.event_name != 'pull_request'
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          tag="build-${GITHUB_SHA::7}${{ inputs.test_hooks && '-testhooks' || '' }}"
+          gh release delete "$tag" -y --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "$tag" \
+            --notes "CI build of ${GITHUB_SHA::7}; gui-gate ${GATE_REF::7}. ${{ inputs.test_hooks && 'TEST HOOKS ON: scripted person answers; test boxes only.' || '' }}" \
+            desktop/target/release/bundle/appimage/*.AppImage desktop/target/release/bundle/deb/*.deb dist/resources/SHA256SUMS
