@@ -24,7 +24,7 @@
 | 设置页填写并保存（UI 操作） | 过（有缺陷） | 实机 | “Save key” 会清掉未保存的 URL / 模型名（B6），重填后保存成功 | 2026-10-25 |
 | 密钥只在钥匙串 | 过 | 实机 | `secret-tool search service gui-pi-desktop`：main、reviewer 两条（rust-keyring）；值与源文件一致；config.json（0600，目录 0700）无密钥；全量 grep 无命中 | 2026-10-25 |
 | 【测试连接】 | **不过** | 实机 | 点击后不显示任何结果（B5） | 2026-10-25 |
-| 主模型密钥实际可用 | **不过** | 真模型 | 首个任务 401 UNAUTHORIZED（B1）；时间线只显示 `finished.`（B2）。证据 `/data/workspace/runs/t1`（第一次运行被第二次覆盖前的 agent.jsonl 内容见本节说明） | 2026-10-25 |
+| 主模型密钥实际可用 | **不过** | 真模型 | 首个任务 401 UNAUTHORIZED（B1）；时间线只显示 `finished.`（B2）。证据：完整日志 `logs/agent.jsonl` 里的第一个任务（gate session 59149f01，`stopReason:error`，`errorMessage: 401 UNAUTHORIZED`）；`runs/t1` 已被绕过后的重跑覆盖 | 2026-10-25 |
 | qwen3.8-flash 在 tokenrhythm 上可用 | 过 | 真模型 | `/v1/models` 含 qwen3.8-flash；chat/completions 返回正常 | 2026-10-25 |
 
 ### 2. 门的每种返回动作
