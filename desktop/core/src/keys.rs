@@ -40,6 +40,16 @@ impl KeyStore for MemoryStore {
     }
 }
 
+/// What the settings page says about where keys are kept.
+pub fn store_notice(kind: &str) -> &'static str {
+    if kind == "keychain" {
+        "Keys are kept in the system keychain."
+    } else {
+        "No system keychain is available (on Linux: no Secret Service such as gnome-keyring or KWallet is running). \
+         Keys are kept in memory for this run only and are never written to disk: you will enter them again next time."
+    }
+}
+
 /// Never show a key: the settings page gets "set" + the last 4 characters at most.
 pub fn preview(v: &str) -> String {
     let n = v.chars().count();
@@ -62,5 +72,8 @@ mod tests {
         assert_eq!(preview("short"), "set");
         m.delete("main").unwrap();
         assert!(!m.has("main"));
+        assert_eq!(m.kind(), "memory");
+        assert!(store_notice("memory").contains("this run only") && store_notice("memory").contains("never written to disk"));
+        assert!(store_notice("keychain").contains("keychain"));
     }
 }
