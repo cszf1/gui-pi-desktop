@@ -16,6 +16,10 @@ const MAX_ROUNDS = 3;
 /** keys the model must never be able to set: they would let it answer for the person (the last three are legacy
  *  gate keys, stripped in case an old gate still reads them) */
 export const FORBIDDEN_ARGS = ["inputResponses", "requestState", "_meta", "gate_confirm", "gate_ack", "gate_task"];
+/** Per-call `_meta` key with the model's real token usage for the turn that produced the call (gate >= 0.10.1 reads it). */
+export const USAGE_META = "gui_pi/usage";
+/** Gate tools only the client calls (never registered with Pi, never offered to the model). */
+export const CLIENT_ONLY_TOOLS = new Set(["gate_next_step", "gate_reset"]);
 
 export type ElicitParams = {
   mode?: string;
@@ -51,6 +55,10 @@ export class McpClient {
   stderr: string[] = [];
   onExit: ((code: number | null) => void) | null = null;
   closed = false;
+  /** set by Stop: nothing more is sent to the gate, whatever asks */
+  stopped = false;
+  /** we closed the gate's stdin ourselves (session end): its exit is expected */
+  closing = false;
 
   constructor(askHuman: AskHuman, clientVersion = "0.1.0") {
     this.askHuman = askHuman;
@@ -103,9 +111,10 @@ export class McpClient {
     return { [PV]: PROTOCOL, [CC]: { elicitation: { form: {} } }, [CI]: { name: "gui-pi", version: this.clientVersion } };
   }
 
-  request(method: string, params: Record<string, any> = {}, timeoutMs = 600_000): Promise<any> {
+  request(method: string, params: Record<string, any> = {}, timeoutMs = 600_000, extraMeta?: Record<string, any>): Promise<any> {
+    if (this.stopped) return Promise.reject(new Error("stopped by the user"));
     const id = this.nextId++;
-    const msg = { jsonrpc: "2.0", id, method, params: { ...params, _meta: this.meta() } };
+    const msg = { jsonrpc: "2.0", id, method, params: { ...params, _meta: { ...(extraMeta || {}), ...this.meta() } } };
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
         this.pending.delete(id);
@@ -144,9 +153,13 @@ export class McpClient {
     return m.result?.tools || [];
   }
 
-  /** tools/call with MRTR person rounds. */
-  async callTool(name: string, rawArgs: any, signal?: AbortSignal): Promise<ToolResult> {
+  /** tools/call with MRTR person rounds. `extraMeta` (e.g. USAGE_META) goes into the request's `_meta`, never into
+   *  `arguments`; the protocol keys always win over it. */
+  async callTool(name: string, rawArgs: any, signal?: AbortSignal, extraMeta?: Record<string, any>, timeoutMs = 600_000): Promise<ToolResult> {
     const args = cleanArgs(rawArgs);
+    if (this.stopped)
+      return { content: [{ type: "text", text: "[gui-pi] the user pressed Stop; nothing was executed." }],
+               isError: true, structuredContent: { status: "blocked", stopped: true } };
     if (this.closed || !this.child)
       return { content: [{ type: "text", text: "[gui-pi] gui-gate is not running; nothing was executed. The task cannot continue." }],
                isError: true, structuredContent: { status: "blocked", gate_lost: true } };
@@ -154,8 +167,11 @@ export class McpClient {
     for (let round = 0; round <= MAX_ROUNDS; round++) {
       let m: any;
       try {
-        m = await this.request("tools/call", params);
+        m = await this.request("tools/call", params, timeoutMs, extraMeta);
       } catch (e: any) {
+        if (this.stopped)
+          return { content: [{ type: "text", text: "[gui-pi] the user pressed Stop while this step was in flight; its outcome is unknown." }],
+                   isError: true, structuredContent: { status: "unknown", stopped: true } };
         // the gate died or stopped answering while the step was in flight: it may or may not have run. Never retried.
         return { content: [{ type: "text", text: `[gui-pi] no result from gui-gate (${String(e?.message || e).slice(0, 300)}). ` +
                  "The outcome of this step is unknown." }], isError: true, structuredContent: { status: "unknown", gate_lost: true } };
@@ -184,8 +200,19 @@ export class McpClient {
   }
 
   close() {
+    this.closing = true;
     try {
       this.child?.stdin?.end();
+    } catch {}
+  }
+
+  /** Stop: refuse every later request and kill the gate now (it takes its driver with it). */
+  kill() {
+    this.stopped = true;
+    for (const p of this.pending.values()) p.reject(new Error("stopped by the user"));
+    this.pending.clear();
+    try {
+      this.child?.kill("SIGKILL");
     } catch {}
   }
 }

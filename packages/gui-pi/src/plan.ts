@@ -1,7 +1,8 @@
-// A read-only copy of the plan the agent gave the gate with set_plan (the gate owns the real one), and when to
-// remind the model of it. Reminders come only at milestones - a plan step done or failed, right after a refusal,
-// or after STALL_STEPS actions without progress - never on every result (a mechanical line on every result can
-// lock in a wrong route).
+// The one plan state the model is shown (built from the agent's set_plan calls, which also go to the gate), and when
+// to remind the model of it. Reminders come only at milestones - a plan step done or failed -, right after a
+// compaction, or on drift (a refusal, or STALL_STEPS actions without progress); never on every result (a mechanical
+// line on every result can lock in a wrong route). The gate's own per-result "[plan] k/n done" line is removed
+// from results (stripGatePlan), so the model hears about the plan from one place only.
 export const STALL_STEPS = 8;
 
 export class PlanTracker {
@@ -51,9 +52,15 @@ export type StepEvent = {
   after?: { done: number; failed: number };
 };
 
+/** The gate's mechanical "[plan] ..." text items, removed from a result (the client's reminders replace them). */
+export function stripGatePlan(content: any[]): any[] {
+  return (content || []).filter((c: any) => !(c && c.type === "text" && /^\[plan\] /.test(String(c.text || "").trim())));
+}
+
 /** Decides when a plan reminder goes on a result. */
 export class Reminder {
   sinceProgress = 0;
+  compacted = false;
   plan: PlanTracker;
   stall: number;
   constructor(plan: PlanTracker, stall = STALL_STEPS) {
@@ -61,8 +68,18 @@ export class Reminder {
     this.stall = stall;
   }
 
+  /** The next result carries the plan (the model's older context was just compacted away). */
+  afterCompaction() {
+    this.compacted = true;
+  }
+
   onResult(e: StepEvent): string | null {
     const line = this.plan.line();
+    if (this.compacted) {
+      this.compacted = false;
+      this.sinceProgress = 0;
+      if (line) return `${line} (after compaction: this is where the task stands)`;
+    }
     if (e.before && e.after) {
       if (e.after.done > e.before.done) {
         this.sinceProgress = 0;

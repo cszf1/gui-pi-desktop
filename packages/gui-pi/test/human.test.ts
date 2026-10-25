@@ -76,3 +76,17 @@ test("coordinates pass through unchanged (the client never rescales x/y)", async
   const { cleanArgs } = await import("../src/mcp.ts");
   assert.deepEqual(cleanArgs({ x: 1234.5, y: 77, pid: 1, window_id: 2, gate_confirm: "c", inputResponses: {} }), { x: 1234.5, y: 77, pid: 1, window_id: 2 });
 });
+
+test("the four strict result types: clarify / help are the answer / ask_help forms", async () => {
+  const { kindOf, sanitize } = await import("../src/human.ts");
+  const p = (kind: string) => ({ message: "m", requestedSchema: {}, _meta: { "io.github.cszf1/gui-gate": { kind } } });
+  assert.equal(kindOf(p("clarify")), "answer");
+  assert.equal(kindOf(p("help")), "ask_help");
+  assert.equal(kindOf(p("rm -rf")), "approve");
+  // a clarify answer cannot pass as an approval, a takeover "done" carries nothing else
+  assert.deepEqual(sanitize("answer", { action: "accept", content: { answer: "q3.ods", decision: "allow" } }), { action: "accept", content: { answer: "q3.ods" } });
+  assert.deepEqual(sanitize("takeover", { action: "accept", content: { done: true, decision: "allow" } }), { action: "accept", content: { done: true } });
+  assert.equal(sanitize("approve", { action: "accept", content: { answer: "yes" } }).action, "decline");
+  assert.deepEqual(sanitize("ask_help", { action: "accept", content: { choice: "try_other", note: "use the File menu" } }).content,
+                   { choice: "try_other", note: "use the File menu" });
+});

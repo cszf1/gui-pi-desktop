@@ -18,6 +18,10 @@ export const READ_TOOLS = new Set(["get_window_state", "list_windows", "list_app
 
 export type Interp = {
   status: string;
+  /** the gate's next_action (e.g. "rethink"), when it gives one */
+  nextAction: string | null;
+  /** a person did this step themselves (status done_by_person, or the older gate.done_by_person flag) */
+  byPerson: boolean;
   /** true: it ran; false: nothing ran; "unknown": may or may not have run */
   executed: boolean | "unknown";
   human: HumanOutcome | null;
@@ -56,10 +60,14 @@ function num(v: any): number | null {
 export function interpret(name: string, params: any, r: { content?: any[]; isError?: boolean; structuredContent?: any }): Interp {
   const sc = r.structuredContent || {};
   const text = (r.content || []).filter((c: any) => c?.type === "text").map((c: any) => c.text || "").join("\n");
-  const status = String(sc.status || (r.isError ? "blocked" : "executed"));
+  const byPerson = sc.status === "done_by_person" || sc?.gate?.done_by_person === true;
+  const status = byPerson ? "done_by_person" : String(sc.status || (r.isError ? "blocked" : "executed"));
+  const nextAction = sc.next_action ? String(sc.next_action) : null;
   const human = humanOutcome(sc, text);
   const notes: string[] = [];
-  const executed: boolean | "unknown" = status === "blocked" || status === "input_required" ? false : status === "unknown" ? "unknown" : true;
+  // done_by_person: the AGENT's step did not run (a person did the work); it must never be sent again
+  const executed: boolean | "unknown" =
+    status === "blocked" || status === "input_required" || status === "done_by_person" ? false : status === "unknown" ? "unknown" : true;
   let steps: Interp["steps"] = null;
 
   if (status === "unknown") {
@@ -75,13 +83,20 @@ export function interpret(name: string, params: any, r: { content?: any[]; isErr
       `Steps after step ${ran} did NOT run; continue from the window shown, do not resend the steps that ran.]`);
   } else if (status === "input_required") {
     notes.push("[client: this step needs a person and nothing was executed.]");
+  } else if (status === "done_by_person") {
+    notes.push("[client: A PERSON DID THIS STEP themselves. Do not send it again (it is held if you do). " +
+      "Read the window as it is now (the attached read, or get_window_state) and continue from there.]");
+  }
+  if (status === "blocked" && nextAction === "rethink") {
+    notes.push("[client: the gate asks you to RETHINK: nothing was executed. Do not resend this step or a reworded copy of it. " +
+      "Look at the current window, reconsider what the user asked, and generate a new next action.]");
   }
   if (human) {
     notes.push(`[client: the person ${HUMAN_LABEL[human]}. That counts as a no: the step was refused. ` +
       "Do not ask again for the same thing right away and do not try the same effect another way; take a safe way or stop and report.]");
   }
   const refused = (status === "blocked" || status === "input_required") && (!!human || /refus|declin|reviewer|risk|denied/i.test(text));
-  return { status, executed, human, refused, steps, notes };
+  return { status, nextAction, byPerson, executed, human, refused, steps, notes };
 }
 
 /** A short description of a refused effect, for the task facts (structured when the gate gives one). */

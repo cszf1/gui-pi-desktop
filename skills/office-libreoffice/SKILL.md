@@ -1,11 +1,10 @@
 ---
 name: office-libreoffice
-description: LibreOffice Calc / Writer / Impress paths that work reliably through accessibility tools. Load for spreadsheet, document or slide tasks.
+description: LibreOffice Calc / Writer / Impress through accessibility tools - what the gate's app briefing does not cover (reading results, menus with empty toolbar labels, keeping the file format). Load for spreadsheet, document or slide tasks.
 ---
 # LibreOffice
-- Calc: jump to a cell with the Name Box (click it, type `B2`, Return). Typing then Return/Tab commits; the gate shows the changed cells.
-- Formulas start with `=`; separators follow the locale (`,` in English).
-- Save As: `hotkey ctrl+shift+s`, type the full path in the file name box, choose the type in "File type" if the extension alone is not enough; "Keep current format" when asked.
-- Writer: Format menu for paragraph/character settings; Styles sidebar with F11.
-- Impress: slide sorter via View menu; layouts in the Properties sidebar.
-- Prefer menus (`invoke_menu` or menu clicks) over toolbar icons with empty labels.
+The gate's task briefing already lists the app's shortcuts and menu paths; this adds what matters when working through the accessibility tree.
+- Calc cells show their value in the tree; the formula is in the Name Box / formula bar row after you select the cell.
+- Formula separators follow the locale (`,` in English, `;` in many others): check one cell before filling many.
+- Toolbar icons often have empty labels: use `invoke_menu` or the menu bar instead.
+- Save As with another extension: choose the type in "File type" when the name alone is not enough; answer "Use ... Format!" / "Keep current format" as the task requires.

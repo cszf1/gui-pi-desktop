@@ -19,9 +19,11 @@ export const BASE_ENV_NAMES = [
 ];
 export const BASE_ENV_PREFIXES = ["LC_", "XDG_", "GTK_", "GDK_", "QT_", "CUA_"];
 /** Never given to the gate, whatever the source. */
-export const NEVER_TO_GATE = ["GUI_PI_MAIN_KEY", "GUI_PI_HUMAN_TOKEN", "GUI_GATE_ALLOW_CONFIG"];
+export const NEVER_TO_GATE = ["GUI_PI_MAIN_KEY", "GUI_PI_HUMAN_TOKEN", "GUI_GATE_ALLOW_CONFIG", "GUI_GATE_TASK", "GUI_GATE_TASK_FILE"];
 /** Gate arguments the extension never passes (trusted-launcher / bench only). */
 export const FORBIDDEN_GATE_ARGS = ["--allow-config"];
+/** Task arguments only the user's channel sets (GUI_PI_TASK_FILE / GUI_PI_TASK). */
+export const TASK_ARGS = ["--task", "--task-file"];
 
 const isNever = (k: string) => NEVER_TO_GATE.includes(k) || k.startsWith("GUI_PI_");
 
@@ -40,6 +42,8 @@ export function gateEnv(env: NodeJS.ProcessEnv, fromShell: Record<string, string
     out[k] = v;
   }
   delete out.GUI_GATE_ALLOW_CONFIG;
+  delete out.GUI_GATE_TASK;
+  delete out.GUI_GATE_TASK_FILE;
   out.GUI_GATE_NO_UPDATE_CHECK = "1";
   return out;
 }
@@ -48,11 +52,26 @@ export function gateArgs(env: NodeJS.ProcessEnv): string[] {
   const a = ["--human", "elicit", "--human-timeout", String(Number(env.GUI_PI_HUMAN_TIMEOUT) || 120)];
   a.push("--log", env.GUI_PI_GATE_LOG || "none");
   if (env.GUI_PI_DRIVER) a.push("--driver", env.GUI_PI_DRIVER);
-  if (env.GUI_PI_TASK) a.push("--task", env.GUI_PI_TASK);
+  // the trusted task channel: the shell writes the user's own words to GUI_PI_TASK_FILE (0600, its private runtime
+  // dir) and the gate reads (and re-reads) it. The extension only passes the path on; it never writes the file.
+  if (env.GUI_PI_TASK_FILE) a.push("--task-file", env.GUI_PI_TASK_FILE);
+  else if (env.GUI_PI_TASK) a.push("--task", env.GUI_PI_TASK);
   if (env.GUI_PI_GATE_ARGS) {
     try {
       const extra = JSON.parse(env.GUI_PI_GATE_ARGS);
-      if (Array.isArray(extra)) a.push(...extra.map(String).filter((x) => !FORBIDDEN_GATE_ARGS.includes(x.split("=")[0])));
+      if (Array.isArray(extra)) {
+        const xs = extra.map(String);
+        for (let i = 0; i < xs.length; i++) {
+          const k = xs[i].split("=")[0];
+          if (FORBIDDEN_GATE_ARGS.includes(k)) continue;
+          // the task comes from the user's channel only, never from extra arguments
+          if (TASK_ARGS.includes(k)) {
+            if (!xs[i].includes("=")) i++;
+            continue;
+          }
+          a.push(xs[i]);
+        }
+      }
     } catch {}
   }
   return a;

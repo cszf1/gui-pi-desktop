@@ -10,13 +10,18 @@
 //   2. a diff whose base is no longer in context (compacted away) stays full and gets a note: rows not listed
 //      are unknown, re-read before using other tokens;
 //   3. every other observation of that window becomes a one-line summary (no screenshot);
-//   4. per window only its newest screenshot is kept, at most MAX_IMAGES windows (the most recent ones); older
-//      images become a one-line note. Images whose window is unknown count as one window "?";
+//   4. screenshots: per window only its newest one, at most MAX_IMAGES windows (the most recent ones), plus every
+//      image the model pinned as evidence (pin_evidence, at most 3), plus the newest recall_image result. Every
+//      other image becomes a one-line note naming its id, so recall_image can bring it back (images.ts keeps the
+//      bytes). Images whose window is unknown count as one window "?";
 //   5. text before the observation marker (what the action did, gate notes, client notes) is kept, capped.
 // Removed and reordered rows are made explicit on the diff itself (diffNote, added when the result arrives).
 // Observations whose window is unknown fall back to "newest one stays full".
 
 export const MARKERS = ["[gate] Window right after the action", "[gate] Window now (nothing was executed)"];
+/** Custom message the extension attaches before a turn (gate_next_step): a window read like a tool result's. */
+export const OBSERVE_TYPE = "gui-pi-observe";
+export const RECALL_TOOL = "recall_image";
 const DIFF_RX = /Only rows that changed since snapshot|Nothing in the tree changed since snapshot/;
 const BASE_RX = /changed since snapshot ([A-Za-z0-9_.-]+)/;
 const HEAD_KEEP = 600;
@@ -51,10 +56,15 @@ export function obsMeta(name: string, text: string, sc: any = {}): ObsMeta | nul
   return { kind: isDiff ? "diff" : "full", snapshot, base: isDiff ? base : null };
 }
 
+function isObserveMsg(m: Msg) {
+  return m?.role === "custom" && m.customType === OBSERVE_TYPE;
+}
+
 function metaOf(m: Msg): ObsMeta | null {
-  if (!m || m.role !== "toolResult") return null;
+  if (!m || (m.role !== "toolResult" && !isObserveMsg(m))) return null;
   const d = m.details?.obs;
   if (d && (d.kind === "full" || d.kind === "diff")) return { kind: d.kind, snapshot: d.snapshot ?? null, base: d.base ?? null };
+  if (isObserveMsg(m)) return null;
   return obsMeta(String(m.toolName || ""), textOf(m));
 }
 
@@ -129,7 +139,7 @@ export const ORPHAN_NOTE = (base: string) =>
   `[client: this tree is a diff against snapshot ${base}, which is no longer in context; rows not listed here are unknown. ` +
   "Read the window again (get_window_state) before using any token not shown here.]";
 
-export function prune(messages: Msg[]): Msg[] {
+export function prune(messages: Msg[], opts: { pinned?: Set<string> } = {}): Msg[] {
   const metas = messages.map(metaOf);
   const wins = messages.map((m, i) => (metas[i] ? windowKey(m) : ""));
   // snapshot id -> newest index carrying it
@@ -179,29 +189,67 @@ export function prune(messages: Msg[]): Msg[] {
   metas.forEach((o, i) => {
     if (o && !keep.has(i)) old.add(i);
   });
-  // newest image per window, newest MAX_IMAGES windows only
+  // newest image per window, newest MAX_IMAGES windows only; pinned images and the newest recall always stay
+  const pinned = opts.pinned || new Set<string>();
   const imgByWin = new Map<string, number>();
+  let newestRecall = -1;
   messages.forEach((m, i) => {
-    if (!old.has(i) && hasImage(m)) imgByWin.set(windowKey(m), i);
+    if (!hasImage(m)) return;
+    if (m.role === "toolResult" && m.toolName === RECALL_TOOL) {
+      newestRecall = i;
+      return;
+    }
+    if (!old.has(i)) imgByWin.set(windowKey(m), i);
   });
   const keepImg = new Set([...imgByWin.values()].sort((a, b) => b - a).slice(0, MAX_IMAGES));
+  if (newestRecall >= 0) keepImg.add(newestRecall);
   return messages.map((m, i) => {
     const isOld = old.has(i);
-    const dropImg = hasImage(m) && !keepImg.has(i);
+    const ids = imageIds(m);
+    const anyPinned = ids.some((id) => pinned.has(id));
+    const dropImg = hasImage(m) && (isOld || !keepImg.has(i));
     const orph = orphan.get(i);
     if (!isOld && !dropImg && orph === undefined) return m;
     const content: any[] = [];
     let dropped = 0;
+    let k = 0;
+    const gone: string[] = [];
     for (const c of m.content || []) {
-      if (c && c.type === "image" && (isOld || dropImg)) {
-        dropped++;
+      if (c && c.type === "image") {
+        const id = ids[k++];
+        if (dropImg && !(id && pinned.has(id))) {
+          dropped++;
+          if (id) gone.push(id);
+          continue;
+        }
+        content.push(c);
         continue;
       }
       if (isOld && c && c.type === "text") content.push({ ...c, text: pruneText(c.text || "", m.toolName) });
       else content.push(c);
     }
-    if (dropped && !isOld) content.push({ type: "text", text: "[client: an older screenshot was removed; the newest one of this window is current]" });
+    if (dropped) {
+      content.push({ type: "text", text: gone.length
+        ? `[client: screenshot ${gone.join(", ")} removed from context (a newer one of this window is current); recall_image brings it back]`
+        : "[client: an older screenshot was removed; the newest one of this window is current]" });
+    }
+    if (anyPinned && dropImg) {
+      const lab = ids.filter((id) => pinned.has(id));
+      content.push({ type: "text", text: `[client: pinned evidence kept: ${lab.join(", ")}]` });
+    }
     if (orph !== undefined && !textOf(m).includes("which is no longer in context")) content.push({ type: "text", text: ORPHAN_NOTE(orph) });
     return { ...m, content };
   });
+}
+
+/** Ids of a message's images, in order: details.images (set when the result arrived), else the client tags. */
+export function imageIds(m: Msg): string[] {
+  const d = m?.details?.images;
+  if (Array.isArray(d)) return d.map(String);
+  const out: string[] = [];
+  for (const c of m?.content || []) {
+    if (c?.type !== "text") continue;
+    for (const x of String(c.text || "").matchAll(/\[client: screenshot (img-\d+)/g)) out.push(x[1]);
+  }
+  return out;
 }

@@ -22,3 +22,18 @@ test("reminders only at milestones, refusals and stalls", () => {
   assert.match(r.onResult({ tool: "click", action: true, refused: true })!, /after a refusal/);
   assert.match(p.summary(), /2\. \[!\] edit/);
 });
+
+test("one plan voice: the gate's per-result [plan] line is removed; reminders after compaction and on drift only", async () => {
+  const { stripGatePlan } = await import("../src/plan.ts");
+  const c = stripGatePlan([{ type: "text", text: "Clicked" }, { type: "text", text: "[plan] 1/3 done; next: 2. save" }, { type: "image", data: "x" }]);
+  assert.deepEqual(c.map((x: any) => x.type), ["text", "image"]);
+  const p = new PlanTracker();
+  p.update({ feasible: true, milestones: ["a", "b"] });
+  const r = new Reminder(p, 3);
+  assert.equal(r.onResult({ tool: "click", action: true, refused: false }), null);
+  r.afterCompaction();
+  assert.match(r.onResult({ tool: "click", action: true, refused: false })!, /after compaction/);
+  assert.equal(r.onResult({ tool: "click", action: true, refused: false }), null, "once only");
+  r.onResult({ tool: "click", action: true, refused: false });
+  assert.match(r.onResult({ tool: "click", action: true, refused: false })!, /check you are still on the plan/);
+});

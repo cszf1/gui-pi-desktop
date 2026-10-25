@@ -1,11 +1,10 @@
 ---
 name: browser
-description: Chromium / Firefox basics - address bar, tabs, downloads, forms, settings pages. Load for web tasks.
+description: Web browsers (Chromium, Firefox) through accessibility tools - long page trees, forms, downloads, and which steps belong to the person. Load for web tasks.
 ---
 # Browser
-- Address bar: `hotkey ctrl+l`, type the URL, Return.
-- New tab `ctrl+t`, close `ctrl+w`, next tab `ctrl+tab`.
-- Settings: type `chrome://settings/...` or `about:preferences` directly.
-- Downloads land in ~/Downloads unless the task says otherwise.
-- Web content trees can be long: use the attached diff, scroll, and screenshots for visual elements.
-- Logins and payments are takeovers.
+The gate's task briefing lists Chrome's settings pages and shortcuts; this adds the rest.
+- Firefox settings: `about:preferences` in the address bar (`ctrl+l`).
+- Web page trees are long: use the attached diff, `scroll`, and a screenshot for visual-only elements.
+- A download is finished when the file is in ~/Downloads (or the folder the task names): check the file, not the download bar.
+- Logins, payments and anything personal are takeovers (ask-human skill).

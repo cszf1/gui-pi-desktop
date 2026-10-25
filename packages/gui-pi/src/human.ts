@@ -9,11 +9,15 @@ import { connect } from "node:net";
 import { readFileSync } from "node:fs";
 import { GG, type ElicitParams, type ElicitResult } from "./mcp.ts";
 
+// Four strict result types (the gate's form decides the shape): approve {decision}, clarify {answer},
+// takeover {done}, help {choice, note}. The gate's older names answer / ask_help are the same two forms.
 export type Kind = "approve" | "answer" | "takeover" | "ask_help";
 export const KINDS: Kind[] = ["approve", "answer", "takeover", "ask_help"];
+export const KIND_ALIASES: Record<string, Kind> = { clarify: "answer", help: "ask_help" };
 
 export function kindOf(p: ElicitParams): Kind {
-  const k = p?._meta?.[GG]?.kind;
+  const raw = p?._meta?.[GG]?.kind;
+  const k = KIND_ALIASES[raw] ?? raw;
   return KINDS.includes(k) ? k : "approve";
 }
 
