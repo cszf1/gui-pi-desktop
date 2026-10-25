@@ -9,5 +9,6 @@
     "test": "node --test test/*.test.ts"
   },
   "pi": { "extensions": ["./index.ts"] },
-  "engines": { "node": ">=22.18" }
+  "engines": { "node": ">=22.19.0" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "1.4.0" }
 }

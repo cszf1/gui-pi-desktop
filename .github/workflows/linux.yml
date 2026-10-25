@@ -1,0 +1,58 @@
+name: linux
+# Tests everything, then builds the Linux AppImage + .deb with node, Pi 1.4.0, the gui-pi extension, gui-gate and
+# Cua Driver 0.38.0 inside. GATE_REF pins the gui-gate commit the app ships.
+on:
+  push: {branches: [main]}
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
+env:
+  GATE_REF: cc1d530
+permissions: {contents: read}
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: {repository: cszf1/gui-gate, ref: "${{ env.GATE_REF }}", path: gate, fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22.23.4"}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: sigstore/cosign-installer@v3
+      - name: system packages (webkit2gtk for Tauri, AT-SPI)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            libssl-dev libdbus-1-dev at-spi2-core file
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: "gate -> target\ndesktop -> target"}
+      - name: gui-gate build + tests (real binary, fake driver, scripted person)
+        working-directory: gate
+        run: |
+          cargo build --release
+          cargo test --release
+          GUI_GATE_BIN=target/release/gui-gate GUI_GATE_NO_UPDATE_CHECK=1 python3 -m unittest discover -s tests
+      - name: extension tests
+        working-directory: packages/gui-pi
+        run: node --test test/*.test.ts
+      - name: shell core tests
+        working-directory: desktop
+        run: cargo test -p gpd-core
+      - name: stage resources (pinned node, Pi lock, gate, Cua Driver 0.38.0 by SHA256)
+        env: {REQUIRE_SIG: "1"}
+        run: scripts/stage-resources.sh "$GITHUB_WORKSPACE/gate"
+      - name: bundle
+        working-directory: desktop/src-tauri
+        run: |
+          feat=""; if [ "${{ inputs.test_hooks }}" = "true" ]; then feat="--features test-hooks"; fi
+          npx -y @tauri-apps/cli@2 build $feat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-pi-desktop-linux-x86_64${{ inputs.test_hooks && '-testhooks' || '' }}
+          path: |
+            desktop/target/release/bundle/appimage/*.AppImage
+            desktop/target/release/bundle/deb/*.deb
+            dist/resources/SHA256SUMS

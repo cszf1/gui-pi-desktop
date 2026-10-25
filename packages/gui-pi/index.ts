@@ -62,6 +62,8 @@ export default async function (pi: any) {
     pi.registerTool({
       name,
       label: name,
+      // GUI actions share one screen and one gate session: never run two at once
+      executionMode: "sequential",
       description: String(t.description || name),
       parameters: t.inputSchema && typeof t.inputSchema === "object" ? t.inputSchema : { type: "object", properties: {} },
       async execute(_id: string, params: any, signal?: AbortSignal) {
@@ -80,12 +82,15 @@ export default async function (pi: any) {
         const title = text.match(/frame = "([^"]{0,80})"/);
         if (title) lastWindow = title[1];
         if (name === "set_plan") plan.update(params);
-        if (text.startsWith("[gate] Not executed") && /refus|declin|reviewer|risk/i.test(text)) refusals.push(text.split("\n")[0].slice(0, 200));
+        // the gate's structured status decides, never the "[gate]" text prefix (it also appears in post-action notes)
+        const status = String(sc.status || (r.isError ? "blocked" : "executed"));
+        if (status === "blocked" && /refus|declin|reviewer|risk/i.test(text)) refusals.push(text.split("\n")[0].slice(0, 200));
         if (text.startsWith("[human via")) answers.push(text.slice(0, 200));
         const content = (r.content || []).filter((c: any) => c && (c.type === "text" || c.type === "image"))
           .map((c: any) => (c.type === "image" ? { type: "image", data: c.data, mimeType: c.mimeType || "image/jpeg" } : { type: "text", text: c.text || "" }));
         return { content: content.length ? content : [{ type: "text", text: "(no output)" }],
-                 details: { windowKey: wkey, gateError: !!r.isError, gate: sc.gate || null } };
+                 isError: !!r.isError,
+                 details: { windowKey: wkey, gateError: !!r.isError, status, gate: sc.gate || null } };
       },
     });
   }

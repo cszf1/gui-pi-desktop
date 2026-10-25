@@ -1,0 +1,6 @@
+{
+  "name": "gui-pi-desktop-bundled-pi",
+  "private": true,
+  "description": "The Pi build bundled into gui-pi-desktop. Pinned; update only on purpose (npm ci uses package-lock.json).",
+  "dependencies": { "@earendil-works/pi-coding-agent": "1.4.0" }
+}

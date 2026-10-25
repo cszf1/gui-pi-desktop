@@ -81,7 +81,7 @@ fn paths(app: &AppHandle) -> Paths {
     let driver = res.join("cua-driver").join(exe("cua-driver"));
     Paths {
         node: res.join("node").join("bin").join(exe("node")),
-        pi_cli: res.join("pi").join("node_modules/@mariozechner/pi-coding-agent/dist/cli.js"),
+        pi_cli: res.join("pi").join("node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
         extension: res.join("gui-pi").join("index.ts"),
         skills: res.join("skills"),
         system_prompt: res.join("prompts").join("system.md"),

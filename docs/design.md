@@ -36,7 +36,7 @@
 └───────────┬────────────────────────────────────────────────────────────┘
             │ 子进程 stdin/stdout：pi --mode rpc（JSON 行）
             │ 环境变量：模型密钥（只在内存和子进程环境里，不落盘）
-┌───────────▼──────────── Pi 0.73.1（内置 node） ────────────────────────┐
+┌───────────▼──────────── Pi 1.4.0（内置 node） ──────────────────────────┐
 │  系统提示词 prompts/system.md，skills/*                                 │
 │  扩展 gui-pi（TS）：                                                     │
 │    · MCP 客户端（2026-07-28：逐请求 _meta + MRTR 问人）                  │
@@ -271,7 +271,7 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
 ```
 resources/
   node/            node 22 LTS 官方二进制（构建时按官方 SHASUMS256 校验）
-  pi/              @mariozechner/pi-coding-agent@0.73.1 + 依赖（package-lock 固定）
+  pi/              @earendil-works/pi-coding-agent@1.4.0 + 依赖（package-lock 固定）
   gui-pi/          扩展编译产物
   prompts/ skills/
   gui-gate         gui-gate 二进制（同仓库 CI 用 desktop-human 分支构建）
