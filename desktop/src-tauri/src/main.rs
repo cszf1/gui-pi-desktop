@@ -423,7 +423,8 @@ fn shutdown(app: &AppHandle) {
         svc.clear_gate_env();
     }
     state.pending.cancel_all();
-    if let Some(a) = state.agent.lock().unwrap().clone() {
+    let agent = state.agent.lock().unwrap().clone();
+    if let Some(a) = agent {
         let _ = a.send(&rpc::abort());
         a.stop(true);
     }
