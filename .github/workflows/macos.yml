@@ -1,0 +1,129 @@
+name: macos
+# macOS universal (arm64 + x86_64): tests everything (gui-gate from GATE_REF, its fake_driver end-to-end suite, the
+# extension, the shell core), then builds gui-pi-desktop.app and the .dmg (UNSIGNED, not notarized) with node (lipo of
+# the official arm64 + x64 builds), Pi 1.4.0, the gui-pi extension, gui-gate (lipo) and Cua's signed CuaDriver.app
+# 0.38.0 (darwin-universal) inside, runs it on the runner (arm64; the x86_64 slice on an Intel runner), and publishes
+# the CI prereleases build-<sha>-macos and build-<sha>-macos-testhooks. No model keys are used in CI.
+on:
+  push: {branches: [main, mac-dev]}
+  pull_request:
+  workflow_dispatch:
+env:
+  GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # gui-gate main dafb126 (same commit in linux.yml / windows.yml)
+permissions: {contents: write}
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: {repository: cszf1/gui-gate, ref: "${{ env.GATE_REF }}", path: gate, fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22.23.4"}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: "gate -> target\ndesktop -> target", key: macos}
+      - name: gui-gate build (arm64 + x86_64 -> universal with lipo) + cargo tests
+        working-directory: gate
+        run: |
+          cargo build --release
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p ../gate-bin
+          lipo -create -output ../gate-bin/gui-gate target/release/gui-gate target/x86_64-apple-darwin/release/gui-gate
+          lipo -info ../gate-bin/gui-gate
+          cargo test --release
+      - name: gui-gate python suite (fake_driver end-to-end: every gate return action, MRTR person requests)
+        working-directory: gate
+        env: {GUI_GATE_BIN: "target/release/gui-gate", GUI_GATE_NO_UPDATE_CHECK: "1"}
+        run: python3 -m unittest discover -s tests
+      - name: extension tests (incl. E2E-ext against the real gui-gate + fake driver)
+        working-directory: packages/gui-pi
+        env: {GUI_GATE_BIN: "${{ github.workspace }}/gate/target/release/gui-gate", GUI_GATE_SRC: "${{ github.workspace }}/gate"}
+        run: node --test test/*.test.ts
+      - name: shell core tests
+        working-directory: desktop
+        env: {GPD_DUMP_MODELS_JSON: "${{ runner.temp }}/models.json"}
+        run: cargo test -p gpd-core
+      - uses: actions/upload-artifact@v4
+        with: {name: gate-macos-universal, path: gate-bin/gui-gate}
+
+  bundle:
+    needs: test
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix: {variant: [normal, testhooks]}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: {repository: cszf1/gui-gate, ref: "${{ env.GATE_REF }}", path: gate, fetch-depth: 0}
+      - uses: actions/download-artifact@v4
+        with: {name: gate-macos-universal, path: gate-bin}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22.23.4"}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: sigstore/cosign-installer@v3
+      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: "desktop -> target", key: "macos-${{ matrix.variant }}"}
+      - name: stage resources (node arm64+x64 -> lipo, Pi lock, gui-gate universal, CuaDriver.app 0.38.0 darwin-universal; SHA256 + Sigstore)
+        env: {REQUIRE_SIG: "1"}
+        run: chmod +x gate-bin/gui-gate && scripts/stage-resources.sh "$GITHUB_WORKSPACE/gate" macos-universal "$GITHUB_WORKSPACE/gate-bin/gui-gate"
+      - name: the bundled Pi reads the main model key from the environment (models.json apiKey "$GUI_PI_MAIN_KEY")
+        working-directory: desktop
+        env: {GPD_DUMP_MODELS_JSON: "${{ runner.temp }}/models.json"}
+        run: |
+          cargo test -p gpd-core --lib keys_only_in_env_never_in_files_or_args -q
+          node ../scripts/check-pi-key.mjs "$RUNNER_TEMP/models.json" ../dist/resources/pi
+      - name: bundle (.app + .dmg, universal, unsigned)
+        working-directory: desktop/src-tauri
+        run: |
+          feat=""; if [ "${{ matrix.variant }}" = "testhooks" ]; then feat="--features test-hooks"; fi
+          npx -y @tauri-apps/cli@2 build --target universal-apple-darwin $feat
+      - name: checksums (resources.SHA256SUMS = what the app checks at start; SHA256SUMS = the packages)
+        run: |
+          cp dist/resources/SHA256SUMS resources.SHA256SUMS
+          ( cd desktop/target/universal-apple-darwin/release/bundle/dmg && shasum -a 256 *.dmg ) > SHA256SUMS
+          cat SHA256SUMS
+      - name: install from the .dmg + run on the runner (signatures, self-check, integrity, screenshots; popups in the test-hooks build)
+        run: bash scripts/ci/mac-smoke.sh "$(ls desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)" "$GITHUB_WORKSPACE/smoke" "${{ matrix.variant }}" "$GITHUB_WORKSPACE/gate"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: "smoke-macos-${{ matrix.variant }}", path: smoke}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-pi-desktop-macos-universal${{ matrix.variant == 'testhooks' && '-testhooks' || '' }}
+          path: |
+            desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            SHA256SUMS
+            resources.SHA256SUMS
+      - name: publish a prerelease (main pushes and manual runs on main)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          tag="build-${GITHUB_SHA::7}-macos${{ matrix.variant == 'testhooks' && '-testhooks' || '' }}"
+          gh release delete "$tag" -y --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "$tag" \
+            --notes "CI build of ${GITHUB_SHA::7} for macOS 13+ (universal: Apple silicon + Intel). UNSIGNED and not notarized: see docs/design.md §6.8 for how to open it past Gatekeeper. gui-gate ${GATE_REF::7}; Cua Driver 0.38.0 (Cua's signed CuaDriver.app). ${{ matrix.variant == 'testhooks' && 'TEST HOOKS ON: scripted person answers and --demo-popups; test machines only.' || '' }}" \
+            desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg SHA256SUMS resources.SHA256SUMS
+
+  intel:
+    # the x86_64 slice of the universal build, on an Intel runner
+    needs: bundle
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: {repository: cszf1/gui-gate, ref: "${{ env.GATE_REF }}", path: gate, fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: actions/download-artifact@v4
+        with: {name: gui-pi-desktop-macos-universal, path: pkg}
+      - name: install + run the universal build on Intel
+        run: bash scripts/ci/mac-smoke.sh "$(ls pkg/desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg pkg/*.dmg 2>/dev/null | head -1)" "$GITHUB_WORKSPACE/smoke" normal "$GITHUB_WORKSPACE/gate"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: smoke-macos-intel, path: smoke}
