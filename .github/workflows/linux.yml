@@ -8,7 +8,7 @@ on:
     inputs:
       test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
 env:
-  GATE_REF: cc1d530f5ce4b0584b83a8f45f9d4ff78be07fce  # gui-gate main, P0 boundary fixes
+  GATE_REF: 367d3f9102ca968b2c77fbec2b2e78f179eb7ef4  # gui-gate main: P0 fixes + allowlisted child env
 permissions: {contents: read}
 jobs:
   build:
