@@ -17,6 +17,8 @@ NODE_VER=v22.23.4
 case "$PLAT" in
   linux-x86_64)   NODE_ASSET=node-$NODE_VER-linux-x64.tar.xz;   NODE_SHA=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce; DRV=linux-x86_64; EXE="";;
   windows-x86_64) NODE_ASSET=node-$NODE_VER-win-x64.zip;        NODE_SHA=cbc74b5e0982c9dbb41525fd8fb5dcd32fbee237863f7829072f4639a1ce5f20; DRV=windows-x86_64; EXE=".exe";;
+  macos-universal) NODE_ASSET=node-$NODE_VER-darwin-arm64.tar.xz; NODE_SHA=037650d0839f457747396f052073fb48333d31bf5abd3c98b74da20d89ebb1ad; DRV=macos-universal; EXE=""
+                  NODE_ASSET2=node-$NODE_VER-darwin-x64.tar.xz; NODE_SHA2=f42abca7aaac61efc57d49fb42ea84fc53bbeba9a749cb03a291ce6e4e7a69c1;;
   macos-aarch64)  NODE_ASSET=node-$NODE_VER-darwin-arm64.tar.xz; NODE_SHA=037650d0839f457747396f052073fb48333d31bf5abd3c98b74da20d89ebb1ad; DRV=macos-universal; EXE="";;
   macos-x86_64)   NODE_ASSET=node-$NODE_VER-darwin-x64.tar.xz;   NODE_SHA=f42abca7aaac61efc57d49fb42ea84fc53bbeba9a749cb03a291ce6e4e7a69c1; DRV=macos-universal; EXE="";;
   *) echo "unknown platform $PLAT" >&2; exit 2;;
@@ -27,14 +29,12 @@ rm -rf "$OUT" && mkdir -p "$OUT"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # node: only the runtime (node[.exe] + LICENSE) at node/bin/node[.exe] on every platform
-curl -fsSL --retry 3 -o "$tmp/$NODE_ASSET" "https://nodejs.org/dist/$NODE_VER/$NODE_ASSET"
-"$PY" - "$tmp/$NODE_ASSET" "$NODE_SHA" <<'EOF'
-import hashlib, sys
-h = hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest()
-if h != sys.argv[2]:
-    raise SystemExit(f"{sys.argv[1]}: sha256 {h} != pinned {sys.argv[2]}")
-print(f"{sys.argv[1]}: sha256 OK")
-EOF
+fetch_node() {  # asset sha
+  curl -fsSL --retry 3 -o "$tmp/$1" "https://nodejs.org/dist/$NODE_VER/$1"
+  "$PY" -c "import hashlib,sys; h=hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest(); sys.exit(0 if h==sys.argv[2] else f'{sys.argv[1]}: sha256 {h} != pinned {sys.argv[2]}')" "$tmp/$1" "$2"
+  echo "$1: sha256 OK"
+}
+fetch_node "$NODE_ASSET" "$NODE_SHA"
 mkdir -p "$OUT/node/bin" "$tmp/node"
 if [ "$PLAT" = windows-x86_64 ]; then
   "$PY" -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$tmp/$NODE_ASSET" "$tmp/node"
@@ -44,6 +44,12 @@ fi
 nd=$(ls -d "$tmp"/node/node-*)
 if [ "$PLAT" = windows-x86_64 ]; then cp "$nd/node.exe" "$OUT/node/bin/node.exe"; else cp -p "$nd/bin/node" "$OUT/node/bin/node"; fi
 cp "$nd/LICENSE" "$OUT/node/LICENSE"
+if [ -n "${NODE_ASSET2:-}" ]; then
+  fetch_node "$NODE_ASSET2" "$NODE_SHA2"
+  mkdir -p "$tmp/node2" && tar -xJf "$tmp/$NODE_ASSET2" -C "$tmp/node2"
+  lipo -create -output "$OUT/node/bin/node" "$nd/bin/node" "$(ls -d "$tmp"/node2/node-*)/bin/node"
+  lipo -info "$OUT/node/bin/node"
+fi
 
 # Pi (exact versions from the lock file)
 mkdir -p "$OUT/pi" && cp "$ROOT/packaging/pi/package.json" "$ROOT/packaging/pi/package-lock.json" "$OUT/pi/"

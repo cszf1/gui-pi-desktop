@@ -9,7 +9,7 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  GATE_REF: 5aece6869ff0e3a9b0d0fd1f2abed0a7b1d9fb79  # set to the gui-gate main commit the app ships (see linux.yml)
+  GATE_REF: 5aece68d6571442684660371fae7f201331816e2  # set to the gui-gate main commit the app ships (see linux.yml)
   PYTHON: python
 permissions: {contents: write}
 jobs:
