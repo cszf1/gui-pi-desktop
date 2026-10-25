@@ -1,5 +1,20 @@
 # Changelog
 
+## 未发布（预发布 build-<sha>；正式 0.3.1 随 gui-gate v0.10.2 一起）
+
+修 0.3.0 在 gui-pi5 实测发现的缺陷（docs/test-log.md）。打包的 gui-gate 指向 gate main 0cae275（v0.10.1 之后，未打 tag）。
+- B1：`models.json` 的 `apiKey` 改为 `"$GUI_PI_MAIN_KEY"`（Pi 1.4.0 只插值 `$NAME`，裸名字是字面密钥 → 401）；单元测试 + CI 用包内 Pi 的 resolveConfigValue 检查（scripts/check-pi-key.mjs）。
+- B2：模型调用失败（`stopReason: "error"`）在时间线显示为错误，任务结束显示“ended with an error … not done”、状态 failed；`--run` 退出码 4。
+- B3：AppImage 打包后把 resources 原样放回（linuxdeploy 给其中 ELF 加了 RUNPATH，组件校验失败、Start 被阻）：scripts/appimage-restore-resources.sh，重打 squashfs 并按 SHA256SUMS 校验。
+- B4：在 AppImage 里，自检调用的系统工具和所有子进程（Pi → 扩展 → gui-gate → 驱动）用去掉 AppImage 库/模块路径的环境（`launch::system_env`），不再加载包里的旧 libdbus。
+- B5：设置页【测试连接】保存时不重绘表单，结果留在页面上。B6：【Save key】不再清掉未保存的 Base URL / 模型名。
+- B7（gate）：超时 / 关窗 / 过期的原因进 gate（`human_outcome` timeout / window_closed / expired，不再记成 declined），模型的提示写明“没有回答”。
+- B8：弹窗开着时排队过期的问题写进 human.jsonl（`outcome: expired, shown: false`），汇总多 `expired` 计数，时间线也显示；回给 gate 的原因是 `expired`。
+- B9：扩展调 `gate_next_step` / `gate_reset` 带客户端标记（`_meta["io.github.cszf1/gui-gate/client"]`）。
+- B10：保存设置 / 存密钥后主窗口立即刷新缺项；启动自检完成后不再停在“Still checking…”；`--run` 启动的任务在主窗口显示为运行中。
+- B11（gate）：接管 / 求助弹窗正文不再写“press Allow / Deny”。
+- gate run_actions：批量里每步（第一步之后）先读窗口，加载中或目标禁用最多等 3 s，仍不行就停下并如实返回；步骤之间新出现的窗口/对话框也停下。
+
 ## 0.3.0 — 2026-10-25（打包 gui-gate v0.10.1，27c479f；兼容 v0.10.0）
 
 按外部审阅 §4（问人）、§5（agent 侧）、§7（桌面产品化）补齐剩下的桌面 / 扩展项。新 gate 接口按名字编码，缺失时退回 0.2 行为（design.md §11 列出全部假设）。

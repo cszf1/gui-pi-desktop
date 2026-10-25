@@ -47,6 +47,9 @@ test("next step: tree, tree+screenshot, none, extra_reason; decision ids logged;
   const ns = calls.filter((c: any) => c.name === NEXT_STEP_TOOL);
   assert.equal(ns.length, 4);
   assert.deepEqual(ns[0].arguments, { window_id: 7 });
+  // B9: the client's own calls carry the gate's client marker (no client_tool_unmarked); the model's calls never do
+  assert.ok(ns.every((c: any) => c._meta?.["io.github.cszf1/gui-gate/client"] === true), "gate_next_step is marked");
+  assert.ok(calls.filter((c: any) => c.name !== NEXT_STEP_TOOL && c.name !== "gate_reset").every((c: any) => c._meta?.["io.github.cszf1/gui-gate/client"] === undefined));
   const reads = calls.filter((c: any) => c.name === "get_window_state");
   assert.deepEqual(reads.map((c: any) => c.arguments.include_screenshot), [undefined, false, true]);
   const logged = h.pi.entries.filter((e) => e.type === "gui-pi-nextstep").map((e) => e.data.decision_id);

@@ -69,6 +69,8 @@ struct AppState {
     redactor: Mutex<Redactor>,
     /// startup checks (Linux self-check, bundle integrity) and the update notice, for the settings page
     checks: Mutex<Value>,
+    /// the first error of the running task (a failed model call): the task ends as "error", not "finished" (B2)
+    run_error: Mutex<Option<String>>,
 }
 
 static TASK_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -149,23 +151,26 @@ fn save_settings(app: AppHandle, state: tauri::State<AppState>, settings: Settin
     private_dir(&dir);
     settings.save_to(&dir, &secrets(keys.as_ref()))?;
     *state.settings.lock().unwrap() = settings;
+    let _ = app.emit("settings_changed", ()); // the main window re-reads its "before you start" list (B10)
     Ok(get_settings(state))
 }
 
 #[tauri::command]
-fn set_key(state: tauri::State<AppState>, slot: String, value: String) -> Result<Value, String> {
+fn set_key(app: AppHandle, state: tauri::State<AppState>, slot: String, value: String) -> Result<Value, String> {
     if !all_slots().contains(&slot) {
         return Err("unknown key slot".into());
     }
     let keys = state.keys.lock().unwrap().clone();
     if value.trim().is_empty() { keys.delete(&slot)? } else { keys.set(&slot, &value)? }
+    let _ = app.emit("settings_changed", ());
     Ok(get_settings(state))
 }
 
 /// "This run only": keys kept in memory when the machine has no keychain.
 #[tauri::command]
-fn use_memory_keys(state: tauri::State<AppState>) -> Value {
+fn use_memory_keys(app: AppHandle, state: tauri::State<AppState>) -> Value {
     *state.keys.lock().unwrap() = Arc::new(MemoryStore::default());
+    let _ = app.emit("settings_changed", ());
     get_settings(state)
 }
 
@@ -320,6 +325,15 @@ fn start_human_service(app: &AppHandle) -> Result<(Arc<Service>, (String, String
             let _ = writeln!(f, "{v}");
         }
     }));
+    // a question that expired in the queue never had a popup: it still shows in the timeline (B8)
+    let a2 = app.clone();
+    svc.set_notify(Box::new(move |v| {
+        let _ = a2.emit("human", v.clone());
+        if headless() {
+            println!("{}", json!({"kind": "human", "text": format!("{} -> {}", v["kind"].as_str().unwrap_or("?"), v["outcome"].as_str().unwrap_or("?")),
+                                  "refused": true}));
+        }
+    }));
     #[cfg(unix)]
     {
         let path = runtime_dir(app).join(format!("{}.sock", std::process::id()));
@@ -364,6 +378,10 @@ fn on_agent_event(app: &AppHandle, e: AgentEvent, log: &Mutex<Option<std::fs::Fi
                 return;
             }
             let done = ev.kind == "done";
+            if ev.kind == "error" {
+                let red = app.state::<AppState>().redactor.lock().unwrap().clone();
+                app.state::<AppState>().run_error.lock().unwrap().get_or_insert(red.line(&ev.text));
+            }
             emit_ui(app, &ev);
             if done {
                 // the run settled: close Pi's stdin (Pi ends the extension, which ends gui-gate and the driver)
@@ -391,9 +409,10 @@ fn on_agent_event(app: &AppHandle, e: AgentEvent, log: &Mutex<Option<std::fs::Fi
                 t.remove();
             }
             *state.agent.lock().unwrap() = None;
-            emit_ui(app, &proc::exit_event(code, reason, &stderr_tail, n));
+            let err = state.run_error.lock().unwrap().take();
+            emit_ui(app, &proc::exit_event_after(code, reason, &stderr_tail, n, err.as_deref()));
             if headless() {
-                app.exit(match reason { ExitReason::Finished => 0, ExitReason::Stopped => 2, _ => 1 });
+                app.exit(match reason { ExitReason::Finished if err.is_some() => 4, ExitReason::Finished => 0, ExitReason::Stopped => 2, _ => 1 });
             }
         }
     }
@@ -434,7 +453,8 @@ fn start_task(app: AppHandle, state: tauri::State<AppState>, task: String) -> Re
     }
     // the gate's settings and keys wait in the service; the extension collects them once, Pi's environment never has them
     svc.stage_gate_env(l.gate_env.clone());
-    let env = launch::child_env(std::env::vars(), &l);
+    // the session's environment without an AppImage's bundled library / module paths (B4)
+    let env = launch::child_env(launch::system_env(std::env::vars()), &l);
     let log = Arc::new(Mutex::new(std::fs::OpenOptions::new().create(true).append(true).open(p.data.join("logs").join("agent.jsonl")).ok()));
     let a = app.clone();
     let on: OnEvent = Arc::new(move |e| on_agent_event(&a, e, &log));
@@ -450,7 +470,10 @@ fn start_task(app: AppHandle, state: tauri::State<AppState>, task: String) -> Re
     *state.agent.lock().unwrap() = Some(agent.clone());
     *state.task.lock().unwrap() = Some(tf);
     *state.last_task.lock().unwrap() = Some(words.as_str().to_string());
+    *state.run_error.lock().unwrap() = None;
     agent.send(&rpc::prompt("task-1", words.as_str())).map_err(|e| format!("the agent did not accept the task: {e}"))?;
+    // the main window learns of a task it did not start itself (--run, Restart) and shows it as running (B10)
+    let _ = app.emit("agent", rpc::UiEvent::new("started", words.as_str()));
     Ok(())
 }
 
@@ -511,6 +534,7 @@ fn startup_checks(app: &AppHandle, keychain: bool, update_check: bool) {
     let v = json!({"system": checks, "integrity": {"ok": !integ.blocks_start(), "unverified": integ.unverified, "message": integ.message()},
                    "blocked": blocked, "update": Value::Null, "version": env!("CARGO_PKG_VERSION")});
     *app.state::<AppState>().checks.lock().unwrap() = v;
+    let _ = app.emit("checks_done", ()); // the main window drops "Still checking..." (B10)
     if headless() {
         for c in &checks {
             eprintln!("[self-check] {}: {} - {}", c.id, c.level, c.message);
@@ -572,7 +596,7 @@ fn main() {
             let update_check = settings.update_check;
             app.manage(AppState { settings: Mutex::new(settings), keys: Mutex::new(keys), agent: Mutex::new(None), last_task: Mutex::new(None),
                                   pending: Arc::new(Pending::default()), service: Mutex::new(None), ipc: Mutex::new(None),
-                                  task: Mutex::new(None), redactor: Mutex::new(Redactor::default()),
+                                  task: Mutex::new(None), redactor: Mutex::new(Redactor::default()), run_error: Mutex::new(None),
                                   checks: Mutex::new(json!({"pending": true, "blocked": CHECKING})) });
             // hashing the bundle takes a moment: off the UI thread; Start waits for it
             let h3 = h.clone();

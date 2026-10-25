@@ -32,6 +32,7 @@ $("start").onclick = () => {
 };
 $("stop").onclick = () => invoke("stop_task");
 let shownUpdate = false;
+let hadError = false;
 // a later message from the person: the shell writes it to the task file (the gate's trusted channel), then to Pi
 const sendMsg = async () => {
   const t = $("message").value.trim(); if (!t) return;
@@ -42,8 +43,16 @@ $("send").onclick = sendMsg;
 $("message").onkeydown = (e) => { if (e.key === "Enter") sendMsg(); };
 listen("agent", (e) => {
   const ev = e.payload;
-  if (ev.kind === "done") { $("status").textContent = ev.text === "aborted" ? "aborted" : "done"; return; }
-  if (ev.kind === "stopped") { running(false, ev.text); add("muted", "Agent " + ev.text); refresh(); return; }
+  // a task the window did not start itself (--run, Restart) still shows as running (B10)
+  if (ev.kind === "started") { hadError = false; running(true); if (!log.textContent) add("text", "Task: " + ev.text); refresh(); return; }
+  if (ev.kind === "error") hadError = true;
+  // B2: a failed model call is never shown as a normal finish
+  if (ev.kind === "done") { $("status").textContent = hadError ? "failed" : ev.text === "aborted" ? "aborted" : "done"; return; }
+  if (ev.kind === "stopped") {
+    const failed = ev.status === "error";
+    running(false, failed ? "failed" : ev.text);
+    add(failed ? "error" : "muted", "Agent " + ev.text); refresh(); return;
+  }
   if (ev.kind === "crashed") {
     running(false, "crashed");
     const b = document.createElement("button"); b.textContent = "Restart the task"; b.className = "primary";
@@ -59,7 +68,12 @@ listen("agent", (e) => {
 // every person question ends in the timeline with its outcome; anything but a yes / an answer is a refusal
 listen("human", (e) => {
   const p = e.payload;
-  add("human" + (p.refused ? " refused" : ""), `asked the person (${p.kind}): ${p.outcome}${p.refused ? " - counts as a refusal" : ""}`);
+  const noAnswer = ["timed out", "expired", "window closed", "cancelled", "unavailable"].includes(p.outcome);
+  const why = p.outcome === "expired" ? " (never shown: another question was open)" : "";
+  add("human" + (p.refused ? " refused" : ""), `asked the person (${p.kind}): ${p.outcome}${why}${noAnswer ? " - no answer, nothing was done" : p.refused ? " - counts as a refusal" : ""}`);
 });
 window.addEventListener("focus", refresh);
+// B10: saved settings and the finished start-up checks update the "before you start" list right away
+listen("settings_changed", refresh);
+listen("checks_done", refresh);
 refresh();

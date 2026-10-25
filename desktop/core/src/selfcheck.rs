@@ -84,7 +84,8 @@ pub fn evaluate(p: &Probe) -> Vec<Check> {
 }
 
 fn run(cmd: &str, args: &[&str]) -> Option<String> {
-    let o = Command::new(cmd).args(args).output().ok()?;
+    // the session's own environment: inside an AppImage its bundled libraries must not reach system tools (B4)
+    let o = Command::new(cmd).args(args).env_clear().envs(crate::launch::system_env(std::env::vars())).output().ok()?;
     if !o.status.success() {
         return None;
     }

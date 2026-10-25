@@ -27,14 +27,27 @@ function modelForm(box, m, protocols, slot, opts = {}) {
   const url = el("input", { value: m.base_url || "", placeholder: opts.optional ? "(empty: main model's)" : "https://..." }); url.oninput = () => (m.base_url = url.value);
   const model = el("input", { value: m.model || "", placeholder: opts.optional ? "(empty: main model's)" : "" }); model.oninput = () => (m.model = model.value);
   const key = el("input", { type: "password", placeholder: state.keys[slot] + (opts.optional ? " (empty: main model's key)" : ""), autocomplete: "off" });
-  const setKey = el("button", { textContent: "Save key" }); setKey.onclick = async () => { state = await invoke("set_key", { slot, value: key.value }); key.value = ""; render(); };
+  // B6: the key goes to the keychain; edits not saved yet (URL, model name, ...) stay in the form
+  const setKey = el("button", { textContent: "Save key" });
+  setKey.onclick = async () => {
+    const edits = state.settings;
+    try { state = await invoke("set_key", { slot, value: key.value }); }
+    catch (e) { res.textContent = "key not saved: " + String(e); return; }
+    state.settings = edits; key.value = ""; render();
+  };
   const test = el("button", { textContent: "Test connection" }); const res = el("span", { className: "muted" });
   test.onclick = async () => {
+    // B5: save without rebuilding the form, so this result span stays on the page
     res.textContent = "save first, then testing...";
-    try { await save(); } catch { res.textContent = "fix the settings first"; return; }
+    try { await save(false); } catch { res.textContent = "fix the settings first"; return; }
     res.textContent = "testing...";
-    const r = await invoke("test_model", { slot });
-    res.textContent = r.ok ? `ok (${r.ms} ms)${r.note && r.note !== "ok" ? " - " + r.note : ""}` : `failed: ${r.error}`;
+    test.disabled = true;
+    try {
+      const r = await invoke("test_model", { slot });
+      res.textContent = r.ok ? `ok (${r.ms} ms)${r.note && r.note !== "ok" ? " - " + r.note : ""}` : `failed: ${r.error}`;
+      res.className = r.ok ? "ok" : "fail";
+    } catch (e) { res.textContent = "failed: " + String(e); res.className = "fail"; }
+    finally { test.disabled = false; }
   };
   box.append(row("Protocol", proto), row("Base URL", hint(url, (v) => urlProblem(v, opts.optional))),
              row("Model name", hint(model, (v) => (!opts.optional && !v.trim() ? "required" : ""))), row("API key", el("div", {}, [key, setKey])));
@@ -87,10 +100,18 @@ function renderChecks(c) {
   if (c.blocked) box.appendChild(el("div", { className: "fail", textContent: "Start is blocked: " + c.blocked }));
 }
 document.getElementById("recheck").onclick = async () => { renderChecks(await invoke("self_check")); };
-async function save() {
+// redraw=false (Test connection): keep the form as it is (its values are what was just saved) and update only the
+// problem list, so a result written into the form is not thrown away.
+async function save(redraw = true) {
   state.settings.human_timeout_s = Number(document.getElementById("timeout").value) || 120;
   state.settings.update_check = document.getElementById("updates").checked;
-  try { state = await invoke("save_settings", { settings: state.settings }); document.getElementById("saved").textContent = "saved"; render(); }
+  try {
+    const edits = state.settings;
+    state = await invoke("save_settings", { settings: state.settings });
+    document.getElementById("saved").textContent = "saved";
+    if (redraw) render();
+    else { state.settings = edits; document.getElementById("problems").textContent = state.problems.join("\n"); renderChecks(state.checks || {}); }
+  }
   catch (e) { document.getElementById("saved").textContent = String(e); throw e; }
 }
 document.getElementById("save").onclick = () => save().catch(() => {});

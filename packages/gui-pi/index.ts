@@ -27,7 +27,7 @@
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { mkdtempSync } from "node:fs";
-import { McpClient, CLIENT_ONLY_TOOLS, type ToolResult } from "./src/mcp.ts";
+import { McpClient, CLIENT_ONLY_TOOLS, CLIENT_META, type ToolResult } from "./src/mcp.ts";
 import { prune, obsKind, obsMeta, diffNote, textOf, OBSERVE_TYPE, RECALL_TOOL } from "./src/context.ts";
 import { makeAskHuman } from "./src/human.ts";
 import { PersonFreeze } from "./src/freeze.ts";
@@ -123,7 +123,8 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
   const gateTools = new Set<string>(tools.map((t: any) => String(t.name)));
 
   // client-only gate tools, feature-detected (listed -> used; else tried once)
-  const clientCall = (name: string, args: any, timeoutMs = 30_000) => mcp.callTool(name, args, undefined, undefined, timeoutMs);
+  const clientCall = (name: string, args: any, timeoutMs = 30_000) => mcp.callTool(name, args, undefined,
+    CLIENT_ONLY_TOOLS.has(name) ? { [CLIENT_META]: true } : undefined, timeoutMs);
   const nextStep = new NextStepper((n, a) => clientCall(n, a), listedNames.has(NEXT_STEP_TOOL), (d) => {
     save(NEXT_STEP_ENTRY, { ...d, at: new Date().toISOString() });
   });

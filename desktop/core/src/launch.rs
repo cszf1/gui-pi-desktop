@@ -125,10 +125,43 @@ pub fn child_env(parent: impl IntoIterator<Item = (String, String)>, l: &Launch)
     out
 }
 
+/// models.json `apiKey`: Pi 1.4.0 resolves "$NAME" / "${NAME}" from its environment (docs/models-configuration.md,
+/// core/resolve-config-value.js); a bare name is a literal key (0.3.0 sent "GUI_PI_MAIN_KEY" itself -> 401).
+pub fn pi_api_key_ref() -> String {
+    format!("${MAIN_KEY_ENV}")
+}
+
+/// Variables an AppImage's runtime and hooks add for the app itself (its bundled libraries, GTK/GIO modules, Python).
+const APPIMAGE_ONLY_ENV: &[&str] = &["LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH", "PERLLIB", "GSETTINGS_SCHEMA_DIR",
+    "GTK_PATH", "GTK_EXE_PREFIX", "GTK_DATA_PREFIX", "GTK_IM_MODULE_FILE", "GDK_PIXBUF_MODULE_FILE", "GDK_PIXBUF_MODULEDIR",
+    "GIO_MODULE_DIR", "GIO_EXTRA_MODULES", "QT_PLUGIN_PATH", "APPDIR", "APPIMAGE", "ARGV0", "OWD"];
+
+/// The session environment as the desktop gave it, for every system tool the shell runs (self-check) and every child
+/// (Pi -> extension -> gui-gate -> driver, python dialogs). Inside an AppImage ($APPDIR set) the runtime points library,
+/// module and data search paths into the mounted image: a system `dbus-send` then loads the image's older libdbus
+/// and fails (0.3.0: DBus / AT-SPI wrongly reported broken). Those variables are dropped and $APPDIR entries are
+/// removed from path lists. Outside an AppImage nothing changes.
+pub fn system_env(vars: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
+    let vars: Vec<(String, String)> = vars.into_iter().collect();
+    let appdir = vars.iter().find(|(k, _)| k == "APPDIR").map(|(_, v)| v.trim_end_matches('/').to_string()).filter(|v| v.len() > 1);
+    let Some(appdir) = appdir else { return vars };
+    let inside = |p: &str| p == appdir || p.starts_with(&format!("{appdir}/"));
+    vars.into_iter().filter_map(|(k, v)| {
+        if APPIMAGE_ONLY_ENV.contains(&k.as_str()) {
+            return None;
+        }
+        if !v.contains(&appdir) {
+            return Some((k, v));
+        }
+        let kept: Vec<&str> = v.split(':').filter(|p| !p.is_empty() && !inside(p)).collect();
+        if kept.is_empty() { None } else { Some((k, kept.join(":"))) }
+    }).collect()
+}
+
 fn pi_models_json(m: &ModelCfg) -> String {
     let vision = m.vision.unwrap_or(true);
     json!({"providers": {PROVIDER: {
-        "baseUrl": m.base_url.trim(), "api": m.protocol, "apiKey": MAIN_KEY_ENV,
+        "baseUrl": m.base_url.trim(), "api": m.protocol, "apiKey": pi_api_key_ref(),
         "models": [{"id": m.model.trim(), "reasoning": true, "input": if vision { json!(["text", "image"]) } else { json!(["text"]) },
                     "contextWindow": 128000, "maxTokens": 16384}]}}}).to_string()
 }
@@ -265,7 +298,16 @@ mod tests {
         assert_eq!(pi("GUI_PI_TASK").as_deref(), Some("rename the file"));
         for (_, content) in &l.files {
             assert!(!content.contains("secret"), "{content}");
-            assert!(content.contains("GUI_PI_MAIN_KEY"));
+        }
+        // B1: the key is an environment reference Pi resolves ("$NAME"), never the bare name (a literal key -> 401)
+        let models = l.files.iter().find(|(f, _)| f.ends_with("models.json")).map(|(_, c)| c.clone()).expect("models.json");
+        let mj: serde_json::Value = serde_json::from_str(&models).unwrap();
+        let key = mj["providers"].as_object().unwrap().values().next().unwrap()["apiKey"].as_str().unwrap().to_string();
+        assert_eq!(key, "$GUI_PI_MAIN_KEY");
+        assert_eq!(key, pi_api_key_ref());
+        if let Ok(out) = std::env::var("GPD_DUMP_MODELS_JSON") {
+            // CI: scripts/check-pi-key.mjs resolves this file with the bundled Pi's own resolver
+            std::fs::write(out, &models).unwrap();
         }
         assert!(!l.args.iter().any(|a| a.contains("secret")));
         assert!(l.redacted_env().iter().all(|(_, v)| !v.contains("secret")));
@@ -395,5 +437,27 @@ mod tests {
         k.delete("reviewer").unwrap();
         let e = build(&s, &k, &p, "x", None, None).unwrap_err();
         assert!(e.iter().any(|x| x.contains("Reviewer")));
+    }
+
+    #[test]
+    fn appimage_paths_never_reach_system_tools_or_children() {
+        let kv = |v: &[(&str, &str)]| v.iter().map(|(k, x)| (k.to_string(), x.to_string())).collect::<Vec<_>>();
+        // not an AppImage: unchanged
+        let plain = kv(&[("PATH", "/usr/bin"), ("LD_LIBRARY_PATH", "/opt/x/lib")]);
+        assert_eq!(system_env(plain.clone()), plain);
+        let e = system_env(kv(&[("APPDIR", "/tmp/.mount_gui-piX"), ("APPIMAGE", "/home/u/gui-pi.AppImage"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_gui-piX/usr/lib:/tmp/.mount_gui-piX/usr/lib/x86_64-linux-gnu"),
+            ("PATH", "/tmp/.mount_gui-piX/usr/bin:/usr/local/bin:/usr/bin"), ("XDG_DATA_DIRS", "/tmp/.mount_gui-piX/usr/share:/usr/share"),
+            ("GTK_PATH", "/tmp/.mount_gui-piX/usr/lib/gtk-3.0"), ("GDK_PIXBUF_MODULE_FILE", "/tmp/.mount_gui-piX/x.cache"),
+            ("DISPLAY", ":1"), ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")]));
+        let get = |k: &str| e.iter().find(|(x, _)| x == k).map(|(_, v)| v.clone());
+        assert_eq!(get("LD_LIBRARY_PATH"), None);
+        assert_eq!(get("GTK_PATH"), None);
+        assert_eq!(get("GDK_PIXBUF_MODULE_FILE"), None);
+        assert_eq!(get("APPDIR"), None);
+        assert_eq!(get("PATH").as_deref(), Some("/usr/local/bin:/usr/bin"));
+        assert_eq!(get("XDG_DATA_DIRS").as_deref(), Some("/usr/share"));
+        assert_eq!(get("DISPLAY").as_deref(), Some(":1"));
+        assert_eq!(get("DBUS_SESSION_BUS_ADDRESS").as_deref(), Some("unix:path=/run/user/1000/bus"));
     }
 }

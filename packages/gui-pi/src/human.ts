@@ -28,7 +28,7 @@ export function timeoutOf(p: ElicitParams, dflt = 120): number {
 
 const DECLINE: ElicitResult = { action: "decline" };
 /** Why a person's answer is a refusal; carried to the gate in the ElicitResult's _meta (the gate records it). */
-export const REASONS = ["declined", "cancelled", "timed_out", "closed", "unavailable"];
+export const REASONS = ["declined", "cancelled", "timed_out", "expired", "closed", "unavailable"];
 
 export function refusal(action: "decline" | "cancel", reason?: string): ElicitResult {
   const r: ElicitResult = { action };

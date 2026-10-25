@@ -240,6 +240,34 @@ pub fn exit_event(code: Option<i32>, reason: ExitReason, stderr_tail: &str, canc
     }
 }
 
+/// The exit event, telling a run whose model call failed apart from a normal finish (B2: a 401 read "finished.").
+pub fn exit_event_after(code: Option<i32>, reason: ExitReason, stderr_tail: &str, cancelled_questions: usize, run_error: Option<&str>) -> rpc::UiEvent {
+    let mut e = exit_event(code, reason, stderr_tail, cancelled_questions);
+    if let (ExitReason::Finished, Some(err)) = (reason, run_error) {
+        e.text = format!("ended with an error, the task was not done: {}{}", err.chars().take(300).collect::<String>(),
+                         e.text.strip_prefix("finished.").unwrap_or(""));
+        e.status = Some("error".into());
+    }
+    e
+}
+
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+    #[test]
+    fn a_failed_model_call_is_not_a_normal_finish() {
+        let ok = exit_event_after(Some(0), ExitReason::Finished, "", 0, None);
+        assert_eq!((ok.kind.as_str(), ok.text.as_str(), ok.status.as_deref()), ("stopped", "finished.", None));
+        let bad = exit_event_after(Some(0), ExitReason::Finished, "", 1, Some("model request failed: 401 UNAUTHORIZED"));
+        assert_eq!(bad.kind, "stopped");
+        assert_eq!(bad.status.as_deref(), Some("error"));
+        assert!(bad.text.contains("401 UNAUTHORIZED") && bad.text.contains("not done") && bad.text.contains("1 open question"), "{}", bad.text);
+        assert!(!bad.text.starts_with("finished"));
+        // a Stop stays a stop
+        assert_eq!(exit_event_after(None, ExitReason::Stopped, "", 0, Some("x")).text, "stopped.");
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;

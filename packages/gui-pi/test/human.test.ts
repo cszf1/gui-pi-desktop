@@ -70,6 +70,8 @@ test("refusal reasons travel to the gate: timeout, unavailable, window closed", 
   assert.equal(reason(r), "closed");
   c.close();
   assert.equal(reason(sanitize("approve", { action: "decline", reason: "made-up" })), undefined);
+  // B8: a question the shell never showed (it expired in the queue) says so; the gate records it as no answer
+  assert.equal(reason(sanitize("help" as any, { action: "decline", reason: "expired" })), "expired");
 });
 
 test("coordinates pass through unchanged (the client never rescales x/y)", async () => {

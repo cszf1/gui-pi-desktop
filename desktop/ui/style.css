@@ -29,3 +29,4 @@ details{border:1px solid #dde1e5;border-radius:8px;padding:10px;background:#fff}
 .options{display:flex;flex-direction:column;gap:6px;margin:6px 0}.options .option{text-align:left}
 .checks .ok{color:#1e785a}.checks .warn{color:#8a4b00}.checks .fail{color:#b3261e;font-weight:600}
 #msgrow{display:none;gap:8px;margin-top:6px}#msgrow input{flex:1}
+span.ok{color:#1e785a}span.fail{color:#b3261e}

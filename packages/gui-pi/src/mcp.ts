@@ -20,6 +20,9 @@ export const FORBIDDEN_ARGS = ["inputResponses", "requestState", "_meta", "gate_
 export const USAGE_META = "gui_pi/usage";
 /** Gate tools only the client calls (never registered with Pi, never offered to the model). */
 export const CLIENT_ONLY_TOOLS = new Set(["gate_next_step", "gate_reset"]);
+/** Per-call `_meta` marker for the client's own calls to the client-only tools (gui-gate CLIENT_META); without it the
+ *  gate logs `client_tool_unmarked` for every gate_next_step / gate_reset. */
+export const CLIENT_META = "io.github.cszf1/gui-gate/client";
 
 export type ElicitParams = {
   mode?: string;

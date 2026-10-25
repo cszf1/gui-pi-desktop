@@ -80,6 +80,7 @@ for (const withReset of [true, false]) {
     const before = h.calls().length;
     const names = h.calls().map((c: any) => c.name);
     assert.equal(names.at(-1), "gate_reset", "gate_reset is tried last (listed, or once for a gate that may have it)");
+    assert.equal(h.calls().at(-1)._meta?.["io.github.cszf1/gui-gate/client"], true, "B9: gate_reset carries the client marker");
     // after Stop: the model's calls are held, a direct execute does not reach the gate either
     const blocked = await h.pi.call("click", { x: 2, y: 2 });
     assert.equal(blocked.blocked, true);

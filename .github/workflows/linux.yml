@@ -8,7 +8,7 @@ on:
     inputs:
       test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
 env:
-  GATE_REF: 27c479f5d28f1dfa1ffecf81ea84fcc603dc1253  # gui-gate v0.10.1
+  GATE_REF: 0cae275ab859c014dab4fd94d455c883ef98300b  # gui-gate main after v0.10.1: fixes from the 0.3.0 live test (not tagged yet; 0.10.2)
 permissions: {contents: write}
 jobs:
   build:
@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
-            libssl-dev libdbus-1-dev at-spi2-core file
+            libssl-dev libdbus-1-dev at-spi2-core file squashfs-tools
       - uses: Swatinem/rust-cache@v2
         with: {workspaces: "gate -> target\ndesktop -> target"}
       - name: gui-gate build + tests (real binary, fake driver, scripted person)
@@ -40,15 +40,20 @@ jobs:
         run: node --test test/*.test.ts
       - name: shell core tests
         working-directory: desktop
+        env: {GPD_DUMP_MODELS_JSON: "${{ runner.temp }}/models.json"}
         run: cargo test -p gpd-core
       - name: stage resources (pinned node, Pi lock, gate, Cua Driver 0.38.0 by SHA256)
         env: {REQUIRE_SIG: "1"}
         run: scripts/stage-resources.sh "$GITHUB_WORKSPACE/gate"
+      - name: the bundled Pi reads the main model key from the environment (models.json apiKey "$GUI_PI_MAIN_KEY")
+        run: node scripts/check-pi-key.mjs "$RUNNER_TEMP/models.json" dist/resources/pi
       - name: bundle
         working-directory: desktop/src-tauri
         run: |
           feat=""; if [ "${{ inputs.test_hooks }}" = "true" ]; then feat="--features test-hooks"; fi
           npx -y @tauri-apps/cli@2 build $feat
+      - name: AppImage - put the staged resources back unpatched (linuxdeploy rewrote their ELFs; the app checks them against SHA256SUMS)
+        run: for a in desktop/target/release/bundle/appimage/*.AppImage; do bash scripts/appimage-restore-resources.sh "$a" dist/resources; done
       - name: release checksums (every bundled file is in resources.SHA256SUMS, checked by the app at start; the packages in SHA256SUMS)
         run: |
           cp dist/resources/SHA256SUMS resources.SHA256SUMS

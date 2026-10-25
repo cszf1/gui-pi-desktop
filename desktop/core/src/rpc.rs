@@ -131,6 +131,12 @@ pub fn ui_event(line: &str) -> Option<UiEvent> {
             if m.get("role").and_then(|r| r.as_str()) != Some("assistant") {
                 return None;
             }
+            // a failed model call (401, quota, network...) ends the turn with stopReason "error": show it as an error,
+            // never as a normal finish (0.3.0 showed only "finished.")
+            if m.get("stopReason").and_then(|r| r.as_str()) == Some("error") {
+                let e = m.get("errorMessage").and_then(|e| e.as_str()).unwrap_or("unknown error");
+                return ev("error", format!("model request failed: {}", e.chars().take(400).collect::<String>()), None);
+            }
             let text = m.get("content").and_then(|c| c.as_array()).map(|a| a.iter()
                 .filter(|x| x.get("type").and_then(|t| t.as_str()) == Some("text"))
                 .filter_map(|x| x.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join("\n")).unwrap_or_default();
@@ -188,6 +194,10 @@ mod tests {
         let m = ui_event(r#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Done: saved q3.ods"}]}}"#).unwrap();
         assert_eq!(m.text, "Done: saved q3.ods");
         assert!(prompt("1", "hi").contains("\"type\":\"prompt\""));
+        // B2: a model error is an error in the timeline, not an empty / normal assistant message
+        let e = ui_event(r#"{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"401 UNAUTHORIZED"}}"#).unwrap();
+        assert_eq!(e.kind, "error");
+        assert!(e.text.contains("401 UNAUTHORIZED"), "{}", e.text);
     }
 
     #[test]

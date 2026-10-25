@@ -78,6 +78,8 @@ pub enum Outcome {
     Closed,
     /// the deadline passed
     Timeout,
+    /// never shown: the question waited in the queue (another popup was open) until its deadline passed
+    Expired,
     /// the app quit, the task was stopped, or the agent process ended while the question was open
     Cancelled,
     /// no popup could be shown (no window, the service is shutting down)
@@ -89,6 +91,7 @@ pub fn reason(o: &Outcome) -> Option<&'static str> {
     match o {
         Outcome::Closed => Some("closed"),
         Outcome::Timeout => Some("timed_out"),
+        Outcome::Expired => Some("expired"),
         Outcome::Cancelled => Some("cancelled"),
         Outcome::Unavailable => Some("unavailable"),
         _ => None,
@@ -106,6 +109,7 @@ pub fn label(kind: &str, o: &Outcome) -> (&'static str, bool) {
         ("answer", Outcome::Text(t)) if !t.trim().is_empty() => ("answered", false),
         (_, Outcome::Closed) => ("window closed", true),
         (_, Outcome::Timeout) => ("timed out", true),
+        (_, Outcome::Expired) => ("expired", true),
         (_, Outcome::Cancelled) => ("cancelled", true),
         (_, Outcome::Unavailable) => ("unavailable", true),
         _ => ("declined", true),
@@ -123,6 +127,7 @@ pub fn to_elicit(kind: &str, o: &Outcome) -> Value {
         (_, Outcome::Closed) => refusal("cancel", "closed"),
         (_, Outcome::Cancelled) => refusal("cancel", "cancelled"),
         (_, Outcome::Timeout) => refusal("decline", "timed_out"),
+        (_, Outcome::Expired) => refusal("decline", "expired"),
         (_, Outcome::Unavailable) => refusal("decline", "unavailable"),
         ("approve", Outcome::Yes) => json!({"action": "accept", "content": {"decision": "allow"}}),
         ("approve", Outcome::No(_)) => json!({"action": "accept", "content": {"decision": "deny"}}),
@@ -285,7 +290,7 @@ impl Metrics {
     pub fn summary(&self, end: &str) -> Value {
         let total = self.started.elapsed().as_secs_f64();
         let open: f64 = self.recs.iter().map(|r| r.secs).sum();
-        let active: f64 = self.recs.iter().filter(|r| !matches!(r.outcome.as_str(), "timed out" | "cancelled" | "unavailable")).map(|r| r.secs).sum();
+        let active: f64 = self.recs.iter().filter(|r| !matches!(r.outcome.as_str(), "timed out" | "expired" | "cancelled" | "unavailable")).map(|r| r.secs).sum();
         let count = |w: &str| self.recs.iter().filter(|r| r.outcome == w).count();
         let mut by_type = serde_json::Map::new();
         for t in ["approve", "clarify", "takeover", "help"] {
@@ -298,7 +303,7 @@ impl Metrics {
                "repeated_ratio": if self.recs.is_empty() { 0.0 } else { r1(self.recs.iter().filter(|r| r.repeated).count() as f64 / self.recs.len() as f64 * 100.0) / 100.0 },
                "person_active_s": r1(active), "person_wait_s": r1((total - open).max(0.0)), "agent_blocked_s": r1(open),
                "takeover_steps": self.recs.iter().map(|r| r.takeover_steps).sum::<usize>(),
-               "cancelled": count("cancelled") + count("window closed"), "timed_out": count("timed out"),
+               "cancelled": count("cancelled") + count("window closed"), "timed_out": count("timed out"), "expired": count("expired"),
                "declined": count("declined"), "unavailable": count("unavailable"), "task_s": r1(total)})
     }
 }
@@ -401,17 +406,29 @@ pub struct Service {
     closing: AtomicBool,
     metrics: Mutex<Option<Metrics>>,
     log: Mutex<Option<LogSink>>,
+    /// the main window's timeline, for questions that never reached a popup (expired in the queue)
+    notify: Mutex<Option<LogSink>>,
     watchers: Mutex<Vec<Sender<StopReq>>>,
 }
 
 impl Service {
     pub fn new(token: String, popup: Popup) -> Arc<Service> {
         Arc::new(Service { token, popup, serial: Mutex::new(()), seen: Mutex::new(HashSet::new()), gate_env: Mutex::new(None),
-                           closing: AtomicBool::new(false), metrics: Mutex::new(None), log: Mutex::new(None), watchers: Mutex::new(vec![]) })
+                           closing: AtomicBool::new(false), metrics: Mutex::new(None), log: Mutex::new(None), notify: Mutex::new(None),
+                           watchers: Mutex::new(vec![]) })
     }
     /// Where per-question and per-task records go (the shell: logs/human.jsonl).
     pub fn set_log(&self, sink: LogSink) {
         *self.log.lock().unwrap_or_else(|e| e.into_inner()) = Some(sink);
+    }
+    /// Where a question that never got a popup is reported (the shell: the main window's timeline).
+    pub fn set_notify(&self, sink: LogSink) {
+        *self.notify.lock().unwrap_or_else(|e| e.into_inner()) = Some(sink);
+    }
+    fn notify(&self, v: &Value) {
+        if let Some(f) = self.notify.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            f(v);
+        }
     }
     fn write_log(&self, v: &Value) {
         if let Some(f) = self.log.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
@@ -510,7 +527,18 @@ impl Service {
         let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         let left = seconds_left(&req, now_ms);
         if left < 1.0 {
-            let mut r = to_elicit(&req.kind, &Outcome::Timeout); // waited in the queue past its deadline
+            // waited in the queue (another question was open) past its deadline: never shown. Recorded like any
+            // other question (B8: 0.3.0 dropped it from human.jsonl) and answered as "no answer: expired".
+            let o = Outcome::Expired;
+            let rec = self.metrics.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
+                .map(|m| (m.task_id.clone(), m.record(&req.kind, &req.message, &req.meta, &o, 0.0)));
+            if let Some((task, r)) = rec {
+                self.write_log(&json!({"ev": "human_q", "schema": "gui-pi-human/1", "task": task, "type": r.ty, "outcome": r.outcome,
+                                       "refused": r.refused, "secs": r.secs, "repeated": r.repeated, "takeover_steps": r.takeover_steps,
+                                       "shown": false}));
+            }
+            self.notify(&json!({"kind": req.kind, "message": req.message, "outcome": "expired", "refused": true, "reason": "expired"}));
+            let mut r = to_elicit(&req.kind, &o);
             r["id"] = json!(id);
             return r;
         }
@@ -843,6 +871,35 @@ mod tests {
         assert_eq!(l.last().unwrap()["ev"], "human_summary");
         assert!(l.iter().all(|v| v["schema"] == "gui-pi-human/1" && v["task"] == "task-7"));
         assert!(svc.end_task("again").is_none());
+    }
+
+    #[test]
+    fn a_question_that_expires_in_the_queue_is_recorded_and_reported() {
+        // B8: while one popup is open, a second question's deadline passes; it was never shown
+        let lines = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let shown = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let (l2, s2) = (lines.clone(), shown.clone());
+        let popup: Popup = Arc::new(move |_, _| { std::thread::sleep(Duration::from_millis(1500)); Outcome::Yes });
+        let svc = Service::new("t".into(), popup);
+        svc.set_log(Box::new(move |v| l2.lock().unwrap().push(v.clone())));
+        svc.set_notify(Box::new(move |v| s2.lock().unwrap().push(v.clone())));
+        svc.begin_task("task-8");
+        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let a = svc.clone();
+        let first = std::thread::spawn(move || a.handle_line(&json!({"token": "t", "id": "q1", "kind": "takeover", "message": "Log in", "timeout_s": 30}).to_string()));
+        std::thread::sleep(Duration::from_millis(100));
+        let r = svc.handle_line(&json!({"token": "t", "id": "q2", "kind": "help", "message": "Stuck", "deadline_ms": now_ms + 900}).to_string());
+        assert_eq!((r["action"].as_str(), r["reason"].as_str()), (Some("decline"), Some("expired")));
+        assert_eq!(first.join().unwrap()["content"]["done"], true);
+        let s = svc.end_task("finished").unwrap();
+        assert_eq!((s["asks"].as_u64(), s["expired"].as_u64()), (Some(2), Some(1)));
+        let l = lines.lock().unwrap();
+        let q: Vec<&Value> = l.iter().filter(|v| v["ev"] == "human_q").collect();
+        assert_eq!(q.len(), 2);
+        let e = q.iter().find(|v| v["type"] == "help").unwrap();
+        assert_eq!((e["outcome"].as_str(), e["refused"].as_bool(), e["shown"].as_bool()), (Some("expired"), Some(true), Some(false)));
+        let n = shown.lock().unwrap();
+        assert_eq!((n.len(), n[0]["outcome"].as_str()), (1, Some("expired")));
     }
 
     #[cfg(unix)]

@@ -117,7 +117,7 @@ node <res>/pi/dist/cli.js --mode rpc \
   --model gui-main/<模型id> --thinking medium
 ```
 
-- 模型配置：壳在应用私有目录（权限 0700）生成 `models.json`，`apiKey` 写环境变量名 `GUI_PI_MAIN_KEY`，真实密钥只放在 Pi 进程的环境里。Pi 1.4.0 支持 apiKey 填环境变量名（docs/models.md）。
+- 模型配置：壳在应用私有目录（权限 0700）生成 `models.json`，`apiKey` 写环境变量引用 `"$GUI_PI_MAIN_KEY"`（Pi 1.4.0 只把 `"$NAME"` / `"${NAME}"` 当作环境变量插值，裸名字是字面密钥，0.3.0 因此全部 401；docs/models-configuration.md），真实密钥只放在 Pi 进程的环境里。CI 用包内 Pi 自己的 resolveConfigValue 检查（scripts/check-pi-key.mjs）。
 - Pi 进程的环境是显式构造的（`env_clear` + 会话变量白名单 + 自己的变量），壳自身环境里的 `GUI_GATE_*`、`GUI_PI_*`、`PI_*` 和任何像密钥的变量都不会继承（`launch::child_env`）。
 - `PI_CODING_AGENT_DIR` 指向应用私有目录，不碰用户自己的 `~/.pi`。
 - thinking 默认 medium（之前 bench 的规则：low/off 不可用）。
