@@ -237,7 +237,10 @@ fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> Outcome {
         // a first guess only: the popup measures its own content and calls popup_fit (round 1: the takeover popup
         // at a fixed 300 px cut off its countdown line)
         .inner_size(480.0, if takeover { 420.0 } else { 380.0 })
-        .always_on_top(true).focused(true).resizable(false)
+        // resizable at the GTK level (a non-resizable GTK window ignores resize requests, so popup_fit did nothing);
+        // the person still cannot resize it: popup_fit pins min = max = the fitted size
+        .always_on_top(true).focused(true).resizable(true)
+        .min_inner_size(480.0, 160.0)
         .build();
     let win = match built {
         Ok(w) => Some(w),
@@ -309,7 +312,14 @@ fn popup_fit(window: tauri::WebviewWindow, height: f64) -> bool {
     }
     let max = window.current_monitor().ok().flatten()
         .map(|m| m.size().height as f64 / m.scale_factor() - 80.0).unwrap_or(720.0).max(200.0);
-    window.set_size(tauri::LogicalSize::new(480.0, height.clamp(160.0, max))).is_ok()
+    let size = tauri::LogicalSize::new(480.0, height.clamp(160.0, max));
+    let _ = window.set_max_size(None::<tauri::LogicalSize<f64>>);
+    let _ = window.set_min_size(None::<tauri::LogicalSize<f64>>);
+    let ok = window.set_size(size).is_ok();
+    eprintln!("[popup] {} fit to 480x{} (content {height:.0}, ok {ok})", window.label(), size.height);
+    let _ = window.set_min_size(Some(size));
+    let _ = window.set_max_size(Some(size));
+    ok
 }
 
 /// The popup's buttons call this. Only the first answer for a popup counts.
