@@ -4,5 +4,5 @@ description: File manager and file dialogs - paths, Save/Open dialogs, overwriti
 ---
 # Files
 - In Open/Save dialogs type the full path into the name field (ctrl+l in GTK dialogs shows a path box).
-- Overwrite prompts are risky steps: the gate decides; if the user asked to overwrite that file, say so in gate_task words.
+- Overwrite prompts are risky steps: the gate decides from the user's own request, its reviewer or the person. Nothing you say authorises it; if it is refused, save under another name or ask with request_human answer.
 - Check the result with `run_command ls -l <path>` or by reading the file manager.

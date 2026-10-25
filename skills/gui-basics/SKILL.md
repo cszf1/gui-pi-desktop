@@ -11,4 +11,5 @@ description: How to observe and act in desktop apps through the gate's tools - r
 - Text: click the field (or use its token), then `type_text`. `set_value` replaces a field's value directly when the role allows it.
 - Keys: `press_key key=Return`, `hotkey keys=["ctrl","s"]`.
 - Lists and long pages: `scroll` on the element or window; tokens change after scrolling, use the attached tree.
-- If a target is missing from the tree (canvas, grid), take a screenshot and aim by x/y in window coordinates.
+- If a target is missing from the tree (canvas, grid), take a screenshot and aim by x/y: window-relative, in the space of that screenshot as the gate gives it (HiDPI scaling is the gate's and driver's job; never rescale).
+- `run_actions` that stops early reports how many steps ran (status partial); an "unknown" outcome means read before acting.
