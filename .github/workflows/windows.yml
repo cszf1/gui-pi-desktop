@@ -9,8 +9,9 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  GATE_REF: 5bdb1526a309fd40311636e7a25a87a9ee52a834  # set to the gui-gate main commit the app ships (see linux.yml)
+  GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # set to the gui-gate main commit the app ships (see linux.yml)
   PYTHON: python
+  GUI_GATE_DIALOG: none  # tests answer person requests through the client (MRTR) or --human: never a real PowerShell dialog
 permissions: {contents: write}
 jobs:
   test:
@@ -48,7 +49,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 60
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
-        run: python -u -m unittest discover -s tests
+        run: python -u -m unittest discover -s tests -v
       - if: ${{ !cancelled() }}
         name: extension tests (incl. E2E-ext against the real gui-gate.exe + fake driver)
         working-directory: packages/gui-pi
