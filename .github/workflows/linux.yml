@@ -8,7 +8,7 @@ on:
     inputs:
       test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
 env:
-  GATE_REF: 025f9baa8fb207687039043cbc07f7dad3203b63  # gui-gate main 025f9ba: 0cae275 + Windows fixes (job log names, child env case, Windows paths in dialog values), tests never open a real dialog, macOS terminal rules (ps/lsof), no hang after a driver crash; not tagged
+  GATE_REF: 6339cf8c7b06ba33b85b4c2ececb93dd8ff5d3c2  # gui-gate main 6339cf8: 025f9ba + Windows paths (W1: C:\..., mixed separators, 8.3 short names, NTFS change time), whole python suite green on Linux/Windows/macOS (gate ci.yml); not tagged
 permissions: {contents: write}
 jobs:
   build:

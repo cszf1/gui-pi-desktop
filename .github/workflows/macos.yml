@@ -9,7 +9,7 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  GATE_REF: 025f9baa8fb207687039043cbc07f7dad3203b63  # gui-gate main 025f9ba (same commit in linux.yml / windows.yml)
+  GATE_REF: 6339cf8c7b06ba33b85b4c2ececb93dd8ff5d3c2  # gui-gate main 6339cf8 (same commit in linux.yml / windows.yml)
   GUI_GATE_DIALOG: none  # tests answer person requests through the client (MRTR) or --human: never a real osascript dialog
 permissions: {contents: write}
 jobs:
@@ -40,9 +40,8 @@ jobs:
         env: {GUI_GATE_BIN: "target/release/gui-gate", GUI_GATE_NO_UPDATE_CHECK: "1"}
         timeout-minutes: 30
         run: python3 -u -m unittest tests.test_actions_e2e tests.test_security_e2e tests.test_mcp_meta -v
-      - name: gui-gate full python suite (informational on macOS - the bench harness and some bash rules assume Linux; see docs/test-log.md)
+      - name: gui-gate full python suite (required; the Linux bench harness skips itself)
         working-directory: gate
-        continue-on-error: true
         timeout-minutes: 40
         env: {GUI_GATE_BIN: "target/release/gui-gate", GUI_GATE_NO_UPDATE_CHECK: "1"}
         run: python3 -u -m unittest discover -s tests -v
