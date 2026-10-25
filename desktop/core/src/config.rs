@@ -11,6 +11,7 @@ pub const GATE_PROTOCOLS: &[&str] = &["chat", "responses", "anthropic", "gemini"
 pub const MIN_HUMAN_TIMEOUT: u32 = 30;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ModelCfg {
     pub protocol: String,
     pub base_url: String,
@@ -25,17 +26,23 @@ pub struct ModelCfg {
     pub vision: Option<bool>,
 }
 
+/// One optional gate role (Settings > Advanced). Off by default; when on, every field left empty inherits the
+/// main model (endpoint, model id, key).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum RoleCfg {
     #[default]
     Off,
+    /// the main model's endpoint, model and key
+    Main,
     /// use the reviewer's endpoint (GUI_GATE_ROLE_<NAME>=reviewer)
     Reviewer,
+    /// its own endpoint; empty fields (and a missing key) inherit the main model
     Custom { model: ModelCfg },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Settings {
     pub main: ModelCfg,
     /// mandatory: there is no way to turn the reviewer off
@@ -78,23 +85,75 @@ pub fn slot_reviewer() -> String {
 pub fn slot_role(r: &str) -> String {
     format!("role.{r}")
 }
+pub fn all_slots() -> Vec<String> {
+    let mut v = vec![slot_main(), slot_reviewer()];
+    v.extend(ROLES.iter().map(|r| slot_role(r)));
+    v
+}
+
+/// The main model's protocol in the gate's words (a role inheriting the main model speaks the same API).
+pub fn gate_protocol_of_main(p: &str) -> &'static str {
+    match p {
+        "openai-responses" => "responses",
+        "anthropic-messages" => "anthropic",
+        "google-generative-ai" => "gemini",
+        _ => "chat",
+    }
+}
+
+/// https only; plain http only for this machine (localhost, 127.0.0.0/8, [::1]). No credentials in the URL.
+pub fn check_base_url(u: &str) -> Result<(), String> {
+    let u = u.trim();
+    if u.is_empty() {
+        return Err("base URL is required".into());
+    }
+    if u.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("base URL must not contain spaces".into());
+    }
+    let (scheme, rest) = u.split_once("://").ok_or("base URL must start with https://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let authority = rest.split(|c| c == '/' || c == '?' || c == '#').next().unwrap_or("");
+    if authority.contains('@') {
+        return Err("base URL must not contain a user name or password (the key goes in the key field)".into());
+    }
+    let host = if let Some(h) = authority.strip_prefix('[') {
+        h.split(']').next().unwrap_or("").to_ascii_lowercase()
+    } else {
+        authority.rsplit_once(':').map(|(h, port)| if port.chars().all(|c| c.is_ascii_digit()) { h } else { authority }).unwrap_or(authority).to_ascii_lowercase()
+    };
+    if host.is_empty() {
+        return Err("base URL has no host".into());
+    }
+    let local = host == "localhost" || host == "::1" || (host.starts_with("127.") && host.split('.').count() == 4 && host.split('.').all(|p| p.parse::<u8>().is_ok()));
+    match scheme.as_str() {
+        "https" => Ok(()),
+        "http" if local => Ok(()),
+        "http" => Err("use https (plain http only for localhost)".into()),
+        _ => Err("base URL must start with https://".into()),
+    }
+}
 
 fn check_model(what: &str, m: &ModelCfg, protocols: &[&str], has_key: bool, errs: &mut Vec<String>) {
     if !protocols.contains(&m.protocol.as_str()) {
         errs.push(format!("{what}: choose a protocol ({})", protocols.join(", ")));
     }
-    let u = m.base_url.trim();
-    if u.is_empty() {
-        errs.push(format!("{what}: base URL is required"));
-    } else if !(u.starts_with("https://") || u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost")) {
-        errs.push(format!("{what}: use https (plain http only for localhost)"));
+    if let Err(e) = check_base_url(&m.base_url) {
+        errs.push(format!("{what}: {e}"));
     }
     if m.model.trim().is_empty() {
-        errs.push(format!("{what}: model id is required"));
+        errs.push(format!("{what}: model name is required"));
     }
     if !has_key {
         errs.push(format!("{what}: API key is not set"));
     }
+}
+
+/// What a role really uses once inheritance is applied: endpoint + which key slot holds its key.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EffRole {
+    Off,
+    Reviewer,
+    Model { model: ModelCfg, key_slot: String },
 }
 
 impl Settings {
@@ -114,7 +173,15 @@ impl Settings {
                 continue;
             }
             if let RoleCfg::Custom { model } = r {
-                check_model(&format!("Role {name}"), model, GATE_PROTOCOLS, has_key(&slot_role(name)), &mut errs);
+                // every field may be left empty (inherits the main model); what is filled in must be valid
+                if !model.protocol.is_empty() && !GATE_PROTOCOLS.contains(&model.protocol.as_str()) {
+                    errs.push(format!("Advanced / role {name}: choose a protocol ({})", GATE_PROTOCOLS.join(", ")));
+                }
+                if !model.base_url.trim().is_empty() {
+                    if let Err(e) = check_base_url(&model.base_url) {
+                        errs.push(format!("Advanced / role {name}: {e}"));
+                    }
+                }
             }
         }
         if self.human_timeout_s < MIN_HUMAN_TIMEOUT {
@@ -123,12 +190,74 @@ impl Settings {
         errs
     }
 
+    /// A role with inheritance applied. `has_key(slot)` tells whether a custom role has its own key.
+    pub fn effective_role(&self, name: &str, has_key: &dyn Fn(&str) -> bool) -> EffRole {
+        let inherit = || ModelCfg {
+            protocol: gate_protocol_of_main(&self.main.protocol).into(),
+            base_url: self.main.base_url.trim().into(),
+            model: self.main.model.trim().into(),
+            timeout_s: None,
+            thinking: None,
+            vision: None,
+        };
+        match self.roles.get(name).cloned().unwrap_or_default() {
+            RoleCfg::Off => EffRole::Off,
+            RoleCfg::Reviewer => EffRole::Reviewer,
+            RoleCfg::Main => EffRole::Model { model: inherit(), key_slot: slot_main() },
+            RoleCfg::Custom { model } => {
+                let base = inherit();
+                let own_url = !model.base_url.trim().is_empty();
+                let m = ModelCfg {
+                    // an own endpoint without an own protocol defaults to chat, never the main model's protocol
+                    protocol: if !model.protocol.is_empty() { model.protocol.clone() } else if own_url { "chat".into() } else { base.protocol },
+                    base_url: if own_url { model.base_url.trim().into() } else { base.base_url },
+                    model: if model.model.trim().is_empty() { base.model } else { model.model.trim().into() },
+                    timeout_s: model.timeout_s,
+                    thinking: None,
+                    vision: None,
+                };
+                let key_slot = if has_key(&slot_role(name)) { slot_role(name) } else { slot_main() };
+                EffRole::Model { model: m, key_slot }
+            }
+        }
+    }
+
     pub fn load(json: &str) -> Result<Settings, String> {
         let mut s: Settings = serde_json::from_str(json).map_err(|e| e.to_string())?;
         for r in ROLES {
             s.roles.entry(r.to_string()).or_default();
         }
         Ok(s)
+    }
+
+    /// The settings file's content. Refuses when any stored key value would end up in it (a key pasted into a
+    /// URL or model field): keys live in the keychain (or this run's memory) only.
+    pub fn to_file_json(&self, secrets: &[String]) -> Result<String, String> {
+        let j = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        for k in secrets {
+            let k = k.trim();
+            if k.len() >= 6 && j.contains(k) {
+                return Err("an API key was typed into a settings field; put keys only in the key fields".into());
+            }
+        }
+        Ok(j)
+    }
+
+    /// Write `config.json` into `dir` (0700 dir, 0600 file on unix). Never contains key material.
+    pub fn save_to(&self, dir: &std::path::Path, secrets: &[String]) -> Result<std::path::PathBuf, String> {
+        let j = self.to_file_json(secrets)?;
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let p = dir.join("config.json");
+        let tmp = dir.join("config.json.tmp");
+        std::fs::write(&tmp, j).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        }
+        std::fs::rename(&tmp, &p).map_err(|e| e.to_string())?;
+        Ok(p)
     }
 }
 
@@ -156,13 +285,45 @@ mod tests {
     }
 
     #[test]
-    fn roles_default_off_and_custom_needs_its_key() {
+    fn roles_default_off_optional_and_inherit_the_main_model() {
         let mut s = filled();
         assert_eq!(s.roles.len(), 7);
         assert!(s.roles.values().all(|r| *r == RoleCfg::Off));
-        s.roles.insert("grounder".into(), RoleCfg::Custom { model: ModelCfg { protocol: "chat".into(), base_url: "https://g.example.com".into(), model: "g".into(), ..Default::default() } });
-        assert!(s.validate(&|slot| slot != "role.grounder").iter().any(|e| e.contains("grounder")));
-        assert!(s.validate(&|_| true).is_empty());
+        assert_eq!(s.effective_role("planner", &|_| true), EffRole::Off);
+        // an empty custom role is valid and is the main model, with the main key
+        s.roles.insert("grounder".into(), RoleCfg::Custom { model: ModelCfg::default() });
+        assert!(s.validate(&|slot| slot != "role.grounder").is_empty());
+        match s.effective_role("grounder", &|slot| slot != "role.grounder") {
+            EffRole::Model { model, key_slot } => {
+                assert_eq!((model.base_url.as_str(), model.model.as_str(), model.protocol.as_str()), ("https://api.example.com/v1", "m", "chat"));
+                assert_eq!(key_slot, "main");
+            }
+            e => panic!("{e:?}"),
+        }
+        // own endpoint, own key, model id inherited
+        s.roles.insert("grounder".into(), RoleCfg::Custom { model: ModelCfg { base_url: "https://g.example.com".into(), ..Default::default() } });
+        match s.effective_role("grounder", &|_| true) {
+            EffRole::Model { model, key_slot } => {
+                assert_eq!((model.base_url.as_str(), model.model.as_str(), model.protocol.as_str()), ("https://g.example.com", "m", "chat"));
+                assert_eq!(key_slot, "role.grounder");
+            }
+            e => panic!("{e:?}"),
+        }
+        s.roles.insert("judge".into(), RoleCfg::Main);
+        s.main.protocol = "anthropic-messages".into();
+        assert!(matches!(s.effective_role("judge", &|_| true), EffRole::Model { ref model, .. } if model.protocol == "anthropic"));
+        s.roles.insert("grounder".into(), RoleCfg::Custom { model: ModelCfg { base_url: "http://g.example.com".into(), ..Default::default() } });
+        assert!(s.validate(&|_| true).iter().any(|e| e.contains("Advanced / role grounder") && e.contains("https")));
+    }
+
+    #[test]
+    fn model_names_are_required() {
+        let mut s = filled();
+        s.main.model = "  ".into();
+        s.reviewer.model.clear();
+        let e = s.validate(&|_| true);
+        assert!(e.iter().any(|x| x.starts_with("Main model") && x.contains("model name")));
+        assert!(e.iter().any(|x| x.starts_with("Reviewer") && x.contains("model name")));
     }
 
     #[test]
@@ -182,6 +343,57 @@ mod tests {
         assert!(s.validate(&|_| true).iter().any(|e| e.contains("https")));
         s.main.base_url = "http://127.0.0.1:8080/v1".into();
         assert!(s.validate(&|_| true).is_empty());
+        for ok in ["https://api.example.com/v1", "http://localhost:11434/v1", "http://[::1]:8080", "HTTPS://X.example.com", "http://127.1.2.3/v1"] {
+            assert!(check_base_url(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "api.example.com", "ftp://x.example.com", "http://localhost.evil.com/v1", "http://127.0.0.1.evil.com",
+                    "http://localhost@evil.com", "https://user:pw@api.example.com", "https://", "https://a b.com", "file:///etc/passwd",
+                    "http://10.0.0.5:8000"] {
+            assert!(check_base_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn reviewer_cannot_be_switched_off_by_a_settings_file() {
+        // there is no field to turn it off: an "enabled": false is an unknown field and the file is refused
+        let mut v = serde_json::to_value(filled()).unwrap();
+        v["reviewer_enabled"] = serde_json::json!(false);
+        assert!(Settings::load(&v.to_string()).is_err());
+        let mut v = serde_json::to_value(filled()).unwrap();
+        v["reviewer"]["enabled"] = serde_json::json!(false);
+        assert!(Settings::load(&v.to_string()).is_err());
+    }
+
+    #[test]
+    fn settings_files_never_contain_key_material() {
+        use crate::keys::{KeyStore, MemoryStore};
+        let keys = MemoryStore::default();
+        keys.set("main", "sk-main-0123456789abcdef").unwrap();
+        keys.set("reviewer", "sk-rev-0123456789abcdef").unwrap();
+        keys.set("role.grounder", "sk-role-0123456789abcd").unwrap();
+        let secrets: Vec<String> = all_slots().iter().filter_map(|s| keys.get(s)).collect();
+        let dir = std::env::temp_dir().join(format!("gpd-cfg-{}", std::process::id()));
+        let mut s = filled();
+        s.roles.insert("grounder".into(), RoleCfg::Custom { model: ModelCfg { base_url: "https://g.example.com".into(), ..Default::default() } });
+        let p = s.save_to(&dir, &secrets).unwrap();
+        // a key pasted into a normal field is refused, and nothing is written
+        let mut bad = s.clone();
+        bad.reviewer.model = "sk-rev-0123456789abcdef".into();
+        assert!(bad.save_to(&dir, &secrets).is_err());
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let c = std::fs::read_to_string(e.path()).unwrap();
+            for k in &secrets {
+                assert!(!c.contains(k.as_str()), "{} contains a key", e.path().display());
+            }
+            assert!(!c.to_lowercase().contains("api_key") && !c.to_lowercase().contains("\"key\""));
+        }
+        assert_eq!(Settings::load(&std::fs::read_to_string(&p).unwrap()).unwrap(), s);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
