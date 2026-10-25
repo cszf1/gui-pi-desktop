@@ -204,9 +204,30 @@ pub fn evaluate_macos(p: &Probe) -> Vec<Check> {
     out
 }
 
-/// Reads "granted" / "denied" / "unknown" for one permission out of `cua-driver permissions status --json`, whose
-/// exact shape is not documented: any key containing `needle` (case-insensitive) with a boolean or a status string.
+/// Reads "granted" / "denied" / "unknown" for one permission out of `cua-driver permissions status --json`.
+/// Shapes of Cua Driver 0.38.0 (the first one seen in CI on a macOS runner, the second its daemon's
+/// check_permissions answer, from Cua's source):
+/// - no CuaDriver daemon running: `{"daemon_running": false, "status": "unknown", "reason": "..."}` -> unknown
+/// - daemon running: `{"accessibility": bool, "screen_recording": bool, "screen_recording_capturable": bool|null,
+///   "direct_capture_status": ..., "source": {...}}`
+/// Text before the JSON (a telemetry notice) is skipped. Other shapes: any key containing `needle`
+/// (case-insensitive) with a boolean or a status string.
 pub fn permission_state(raw: &str, needle: &str) -> String {
+    let body = raw.find('{').map(|i| &raw[i..]).unwrap_or(raw);
+    let Some(Ok(v)) = serde_json::Deserializer::from_str(body).into_iter::<serde_json::Value>().next() else {
+        return "unknown".into();
+    };
+    let exact = match needle { "screen" => "screen_recording", n => n };
+    match v.get(exact) {
+        Some(serde_json::Value::Bool(b)) => return if *b { "granted" } else { "denied" }.into(),
+        Some(serde_json::Value::Null) => return "unknown".into(),
+        None if v.get("status").and_then(|s| s.as_str()) == Some("unknown") => return "unknown".into(),
+        _ => {}
+    }
+    permission_state_any(&v, needle)
+}
+
+fn permission_state_any(v: &serde_json::Value, needle: &str) -> String {
     fn walk(v: &serde_json::Value, needle: &str, key: &str) -> Option<String> {
         let hit = key.to_ascii_lowercase().replace(['_', '-', ' '], "").contains(needle);
         match v {
@@ -231,7 +252,7 @@ pub fn permission_state(raw: &str, needle: &str) -> String {
             _ => None,
         }
     }
-    serde_json::from_str::<serde_json::Value>(raw).ok().and_then(|v| walk(&v, needle, "")).unwrap_or_else(|| "unknown".into())
+    walk(v, needle, "").unwrap_or_else(|| "unknown".into())
 }
 
 /// Run a read-only system command with the session's environment and a time limit; stdout when it succeeded.
@@ -486,5 +507,21 @@ mod tests {
         assert_eq!(permission_state(r#"{"accessibility": {"granted": true}}"#, "accessibility"), "granted");
         assert_eq!(permission_state(r#"{"status": "unknown"}"#, "accessibility"), "unknown");
         assert_eq!(permission_state("not json", "screen"), "unknown");
+    }
+
+    /// The exact outputs of the bundled Cua Driver 0.38.0 (`cua-driver permissions status --json`).
+    #[test]
+    fn permission_json_cua_driver_0_38() {
+        // seen in CI (macOS 26.6.2 runner, nothing granted, no daemon), with the telemetry notice the CLI prints first
+        let ci = "Cua Driver sends content-free product telemetry by default. Run `cua-driver telemetry disable` to stop it.\n{\n  \"daemon_running\": false,\n  \"reason\": \"No CuaDriver daemon is running under the driver's own identity (com.trycua.driver), so its real TCC status can't be read from this process.\",\n  \"status\": \"unknown\"\n}\n";
+        assert_eq!(permission_state(ci, "accessibility"), "unknown");
+        assert_eq!(permission_state(ci, "screen"), "unknown");
+        // the daemon's answer (Cua source: platform-macos check_permissions structuredContent)
+        let up = r#"{"accessibility": true, "screen_recording": false, "screen_recording_capturable": null, "direct_capture_status": "not_checked", "direct_capture_error": null, "source": {"attribution": "driver-daemon", "bundle_id": "com.trycua.driver"}}"#;
+        assert_eq!(permission_state(up, "accessibility"), "granted");
+        assert_eq!(permission_state(up, "screen"), "denied");
+        let both = r#"{"accessibility": true, "screen_recording": true, "screen_recording_capturable": true}"#;
+        assert_eq!(permission_state(both, "screen"), "granted");
+        assert_eq!(permission_state(r#"{"daemon_running": true, "status": "unknown", "reason": "listening"}"#, "screen"), "unknown");
     }
 }

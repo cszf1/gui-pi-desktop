@@ -331,8 +331,29 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
 | 平台 | 状态 | 要点 |
 |---|---|---|
 | Linux | 第一阶段 | 只承诺 X11；Wayland 会话启动自检明确提示（读不到别的应用窗口、输入和截图受限），建议换 X11/Xorg 会话。自检 AT-SPI 总线、DBus 会话、Secret Service（没有就提示“密钥只存本次运行内存”）、WebKitGTK 4.1、glibc ≥ 2.35；失败显示在设置页，fail 项阻止开始 |
-| Windows | 第二阶段 | 应用没有 UIA 时只能看截图；完整性级别：普通权限的 agent 不能给管理员窗口发输入（要人接管）；UAC 在安全桌面上，agent 看不到也点不到（接管）；DPI 感知与多屏缩放；RDP 断开时没有可交互桌面；run_command 不是 bash，风险规则不能直接套 bash 规则 |
-| macOS | 第三阶段 | “辅助功能”和“屏幕录制”两项权限分别授权，撤销后要重启应用才生效；签名身份要稳定，否则权限失效；Retina 下截图像素 = 2× 逻辑点，坐标换算按 §6.6 由驱动给出缩放 |
+| Windows | 第二阶段（x86_64，CI 构建 + 冒烟，未上真机） | 应用没有 UIA 时只能看截图；完整性级别：普通权限的 agent 不能给管理员窗口发输入（要人接管）；UAC 在安全桌面上，agent 看不到也点不到（接管）；DPI 感知与多屏缩放；RDP 断开时没有可交互桌面；run_command 不是 bash，风险规则不能直接套 bash 规则 |
+| macOS | 第三阶段（universal，CI 构建 + 冒烟，未签名未公证，未上真机） | “辅助功能”和“屏幕录制”两项权限分别授权（授给包内 CuaDriver.app，不是 gui-pi），撤销后要重启应用才生效；签名身份要稳定，否则权限失效；Retina 下截图像素 = 2× 逻辑点，坐标换算按 §6.6 由驱动给出缩放 |
+
+
+#### 6.8.1 Windows（x86_64）
+
+- 包：NSIS（按用户安装到 `%LOCALAPPDATA%\gui-pi-desktop`，`/S` 静默）+ MSI，未签名（SmartScreen 会提示“未知发布者”：点“更多信息 → 仍要运行”）。资源同 Linux：node win-x64、Pi 1.4.0、扩展、gui-gate.exe（静态 CRT）、Cua Driver 0.38.0 windows-x86_64，全部按 SHA256 + Sigstore 校验后写 SHA256SUMS，启动时校验。
+- 停止：agent 进程树放进 Job Object，【停止】调用 `TerminateJobObject` 结束整组（对应 Linux 的进程组）；不设 `KILL_ON_JOB_CLOSE`，和 Linux 一样，任务正常结束时 agent 打开的应用留给人用；子进程环境变量按白名单传递，Windows 下变量名不区分大小写（`Path`、`SystemRoot`）。
+- 自检：Windows 版本、WebView2 运行时、UI Automation 是否应答、会话类型（RDP 断开 / 锁屏没有可交互桌面 → 警告）、是否以管理员运行（警告：agent 也能操作管理员窗口，建议普通权限启动）、凭据管理器。
+- human IPC：`127.0.0.1` 随机端口 + 一次性 token（命名管道仍是计划）。gate 自己的 PowerShell 对话框只在没有客户端问人通道时才会用；桌面版总是走 MRTR → 应用弹窗。测试里一律 `GUI_GATE_DIALOG=none`（CI 曾因真实 PowerShell 对话框等满 120 s 超时而“卡住”）。
+- run_command 在 Windows 上**不提供**（风险规则按 bash 写），终端行规则也只认 Linux/macOS 的终端；在 Windows 上让 agent 用 GUI 完成，命令行操作交给人。
+
+#### 6.8.2 macOS（13+，universal：Apple silicon + Intel）
+
+- 包：`gui-pi-desktop.app` + `.dmg`，`tauri build --target universal-apple-darwin`；node 是官方 arm64 + x64 两个构建 `lipo` 合成，gui-gate 同样 `lipo`。Cua 的 `CuaDriver.app` 0.38.0（darwin-universal，Cua 签名）按字节放进 `Contents/Resources/resources/`，**不重签**：辅助功能 / 屏幕录制权限授给 CuaDriver（com.trycua.driver），所以 gui-pi 更新后权限仍在。CI 冒烟用 `codesign --verify --deep --strict` 确认包内 CuaDriver.app 签名仍有效。
+- gui-pi 本身**未签名、未公证**。第一次打开（Gatekeeper）：
+  1. 打开 .dmg，把 gui-pi-desktop 拖进“应用程序”（或 `~/Applications`）。
+  2. macOS 13 / 14：在 Finder 里按住 Control 点 gui-pi-desktop → “打开” → 对话框里再点“打开”。只需一次。
+  3. macOS 15 及以后（Control-点击“打开”不再放行）：先双击一次（会提示无法验证开发者，点“完成”），然后“系统设置 → 隐私与安全性”，在页面下方找到“已阻止使用 gui-pi-desktop”，点“仍要打开”，输入登录密码确认。
+  4. 也可以在终端执行 `xattr -dr com.apple.quarantine /Applications/gui-pi-desktop.app`（去掉下载隔离标记；只对从本项目 Release 下载、且 `shasum -a 256 -c SHA256SUMS` 通过的包这样做）。
+  5. 首次启动后设置页显示 CuaDriver 的两项权限；点【Grant permissions】运行包内 `cua-driver permissions grant`，由 CuaDriver 自己弹系统授权（系统把权限记在 CuaDriver 名下）；也可用【Open Accessibility / Screen Recording settings】直接打开对应设置页手动打开开关，授权后重启 gui-pi。
+- 自检：macOS 版本（< 13 为 fail）、包内 CuaDriver.app 是否存在、`cua-driver permissions status --json` 读出的辅助功能 / 屏幕录制（解析按键名模糊匹配，见 `selfcheck::permission_state`；CI 实际输出见 test-log）、钥匙串。
+- gate 在 macOS 上用 `ps` / `lsof` 认终端（Terminal.app、iTerm2）和 shell 的工作目录（Linux 用 /proc），所以在终端里敲的删除 / 覆盖命令同样走风险规则。
 
 ---
 
@@ -364,7 +385,7 @@ resources/
 - **回滚**：`packaging/linux/appimage-update.sh install NEW.AppImage SHA256SUMS` 先按发布的 SHA256SUMS 校验（不在清单里或哈希不对就拒绝），再把当前版改名为 `gui-pi-desktop.previous.AppImage`、新版成为当前版；`rollback` 交换两者。设置和数据目录两版共用。有测试。
 - 依赖：AT-SPI（at-spi2-core）、webkit2gtk-4.1；.deb 声明依赖，AppImage 运行时检查并提示。
 - 布置资源：`scripts/stage-resources.sh <已构建的 gui-gate 检出目录>` 生成 `dist/resources/`（node 按 SHASUMS256 校验、Pi 按 package-lock `npm ci`、扩展/提示词/skills、gate 二进制、驱动按锁文件哈希和签名校验），最后写 SHA256SUMS。
-- CI：`.github/workflows/linux.yml`，GitHub Actions ubuntu-22.04：构建并测试固定提交的 gui-gate（`GATE_REF`）→ 扩展测试 → `cargo test -p gpd-core` → stage-resources → `tauri build`（AppImage + deb）。Windows：NSIS 安装包 + 便携 zip（第二阶段）。
+- CI：`.github/workflows/linux.yml`，GitHub Actions ubuntu-22.04：构建并测试固定提交的 gui-gate（`GATE_REF`）→ 扩展测试 → `cargo test -p gpd-core` → stage-resources → `tauri build`（AppImage + deb）。`.github/workflows/windows.yml`（windows-latest：gate 构建 + cargo test + fake_driver e2e / 安全 / meta 套件、扩展测试、gpd-core 测试 → NSIS + MSI → 在 runner 桌面静默安装、自检、组件校验、截图、测试钩子版四种弹窗、包内 gui-gate.exe 跑 e2e、卸载）；`.github/workflows/macos.yml`（macos-latest 构建 universal .app/.dmg 并冒烟，再在 Intel runner 上跑同一个 universal 包）。三个工作流用同一个 `GATE_REF`；main 上的推送发布预发布 `build-<sha>-{linux,windows,macos}`（及 `-testhooks`）。
 
 ---
 
@@ -421,9 +442,9 @@ resources/
 | M2 | gui-pi 扩展：MCP 客户端、工具注册、上下文策略、问人桥；提示词与 skills | 扩展单测 + E2E-ext 通过 |
 | M3 | Tauri 壳 Linux：设置页、钥匙串、弹窗、Pi RPC；AppImage/deb | CI 构建出包 |
 | M4 | 测试机 gui-pi4 LIVE：每种门动作和四种问人都真实触发一次 | docs/test-log.md 有逐项记录 |
-| M5 | Windows：命名管道、凭据管理器、NSIS 包、Windows 原生弹窗 | Windows CI 构建 + 测试 |
+| M5 | Windows：凭据管理器、NSIS/MSI 包、Job Object 停止、应用弹窗（命名管道未做，仍是 127.0.0.1 + token） | Windows CI 构建 + 测试 + 安装冒烟（已达成；真机未测） |
 | M6 | 与基线对比（用户下命令后） | 对比报告 |
-| M7 | macOS | — |
+| M7 | macOS universal：.app/.dmg、包内 CuaDriver.app 保持签名、权限自检 | macOS CI 构建 + 冒烟（见 test-log；真机未测） |
 
 ---
 

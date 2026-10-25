@@ -311,7 +311,7 @@ fn urlencode(s: &str) -> String {
 /// The popup asks for the height its content needs (CSS px); clamped to 160 px .. the monitor's height less 80 px.
 /// Width stays 480. A takeover / help popup stays in the top right corner.
 #[tauri::command]
-fn popup_fit(window: tauri::WebviewWindow, height: f64) -> bool {
+fn popup_fit(window: tauri::WebviewWindow, height: f64, need: Option<f64>, seen: Option<f64>) -> bool {
     if !window.label().starts_with("popup-") || !height.is_finite() {
         return false;
     }
@@ -321,7 +321,8 @@ fn popup_fit(window: tauri::WebviewWindow, height: f64) -> bool {
     let _ = window.set_max_size(None::<tauri::LogicalSize<f64>>);
     let _ = window.set_min_size(None::<tauri::LogicalSize<f64>>);
     let ok = window.set_size(size).is_ok();
-    eprintln!("[popup] {} fit to 480x{} (content {height:.0}, ok {ok})", window.label(), size.height);
+    // seen = the page's own innerHeight before this call (CI checks the last one is not short of the content)
+    eprintln!("[popup] {} fit to 480x{} (content {:.0}, ok {ok}, seen {:.0})", window.label(), size.height, need.unwrap_or(height), seen.unwrap_or(-1.0));
     let _ = window.set_min_size(Some(size));
     let _ = window.set_max_size(Some(size));
     ok

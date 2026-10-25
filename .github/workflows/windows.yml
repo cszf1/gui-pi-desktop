@@ -9,7 +9,7 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # gui-gate main dafb126 (same commit in linux.yml / macos.yml)
+  GATE_REF: 6339cf8c7b06ba33b85b4c2ececb93dd8ff5d3c2  # gui-gate main 6339cf8 (same commit in linux.yml / macos.yml)
   PYTHON: python
   GUI_GATE_DIALOG: none  # tests answer person requests through the client (MRTR) or --human: never a real PowerShell dialog
 permissions: {contents: write}
@@ -42,9 +42,8 @@ jobs:
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
         timeout-minutes: 40
         run: python -u -m unittest tests.test_actions_e2e tests.test_security_e2e tests.test_mcp_meta -v
-      - name: gui-gate full python suite (informational on Windows - bash/run_command and bench tests are Linux-only; see docs/test-log.md)
+      - name: gui-gate full python suite (required; bash-only run_command / terminal / jobs and the Linux bench harness skip themselves)
         working-directory: gate
-        continue-on-error: true
         timeout-minutes: 60
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
         run: python -u -m unittest discover -s tests -v
