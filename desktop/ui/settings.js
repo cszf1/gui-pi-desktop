@@ -4,52 +4,83 @@ const GATE_P = ["chat", "responses", "anthropic", "gemini", "systemone"];
 let state = null;
 const el = (tag, attrs = {}, kids = []) => { const e = document.createElement(tag); Object.assign(e, attrs); kids.forEach((k) => e.appendChild(k)); return e; };
 const row = (label, input) => el("div", { className: "row" }, [el("label", { textContent: label }), input]);
-const select = (opts, v) => { const s = el("select"); opts.forEach((o) => s.appendChild(el("option", { value: o, textContent: o, selected: o === v }))); return s; };
+const select = (opts, v, labels = {}) => { const s = el("select"); opts.forEach((o) => s.appendChild(el("option", { value: o, textContent: labels[o] || o, selected: o === v }))); return s; };
 
-function modelForm(box, m, protocols, slot, isMain) {
+// Same rule as gpd-core config::check_base_url (the Rust side decides; this only gives early feedback).
+function urlProblem(u, optional) {
+  u = (u || "").trim();
+  if (!u) return optional ? "" : "required";
+  let x;
+  try { x = new URL(u); } catch { return "not a URL"; }
+  if (x.username || x.password) return "no user name or password in the URL";
+  const h = x.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const local = h === "localhost" || h === "::1" || /^127\.\d+\.\d+\.\d+$/.test(h);
+  if (x.protocol === "https:") return "";
+  if (x.protocol === "http:" && local) return "";
+  return x.protocol === "http:" ? "use https (plain http only for localhost)" : "must start with https://";
+}
+
+function modelForm(box, m, protocols, slot, opts = {}) {
   box.textContent = "";
-  const proto = select(protocols, m.protocol); proto.onchange = () => (m.protocol = proto.value);
-  const url = el("input", { value: m.base_url || "", placeholder: "https://..." }); url.oninput = () => (m.base_url = url.value);
-  const model = el("input", { value: m.model || "" }); model.oninput = () => (m.model = model.value);
-  const key = el("input", { type: "password", placeholder: state.keys[slot] }); 
+  const hint = (inp, fn) => { const s = el("span", { className: "problems" }); const upd = () => (s.textContent = fn(inp.value)); inp.addEventListener("input", upd); upd(); return el("div", {}, [inp, s]); };
+  const proto = select(opts.optional ? ["", ...protocols] : protocols, m.protocol || "", { "": "(same as main model)" }); proto.onchange = () => (m.protocol = proto.value);
+  const url = el("input", { value: m.base_url || "", placeholder: opts.optional ? "(empty: main model's)" : "https://..." }); url.oninput = () => (m.base_url = url.value);
+  const model = el("input", { value: m.model || "", placeholder: opts.optional ? "(empty: main model's)" : "" }); model.oninput = () => (m.model = model.value);
+  const key = el("input", { type: "password", placeholder: state.keys[slot] + (opts.optional ? " (empty: main model's key)" : ""), autocomplete: "off" });
   const setKey = el("button", { textContent: "Save key" }); setKey.onclick = async () => { state = await invoke("set_key", { slot, value: key.value }); key.value = ""; render(); };
   const test = el("button", { textContent: "Test connection" }); const res = el("span", { className: "muted" });
-  test.onclick = async () => { res.textContent = "testing..."; const r = await invoke("test_model", { slot }); res.textContent = r.ok ? `ok (${r.ms} ms)` : `failed: ${r.error}`; };
-  box.append(row("Protocol", proto), row("Base URL", url), row("Model id", model), row("API key", el("div", {}, [key, setKey])));
-  if (isMain) {
+  test.onclick = async () => {
+    res.textContent = "save first, then testing...";
+    try { await save(); } catch { res.textContent = "fix the settings first"; return; }
+    res.textContent = "testing...";
+    const r = await invoke("test_model", { slot });
+    res.textContent = r.ok ? `ok (${r.ms} ms)${r.note && r.note !== "ok" ? " - " + r.note : ""}` : `failed: ${r.error}`;
+  };
+  box.append(row("Protocol", proto), row("Base URL", hint(url, (v) => urlProblem(v, opts.optional))),
+             row("Model name", hint(model, (v) => (!opts.optional && !v.trim() ? "required" : ""))), row("API key", el("div", {}, [key, setKey])));
+  if (opts.isMain) {
     const th = select(["medium", "high", "xhigh"], m.thinking || "medium"); th.onchange = () => (m.thinking = th.value);
     const vis = el("input", { type: "checkbox", checked: m.vision !== false }); vis.onchange = () => (m.vision = vis.checked);
     box.append(row("Thinking", th), row("Reads images", vis));
   } else {
-    const to = el("input", { type: "number", value: m.timeout_s || 60 }); to.oninput = () => (m.timeout_s = Number(to.value));
+    const to = el("input", { type: "number", value: m.timeout_s || 60 }); to.oninput = () => (m.timeout_s = Number(to.value) || null);
     box.append(row("Timeout (s)", to));
   }
   box.append(row("", el("div", {}, [test, res])));
 }
 
+const emptyModel = () => ({ protocol: "", base_url: "", model: "", timeout_s: 120 });
+
 function render() {
   const s = state.settings;
-  document.getElementById("store").textContent = state.store === "keychain" ? "Keys are kept in the system keychain." : "No system keychain here: keys are kept in memory for this run only.";
-  modelForm(document.getElementById("main"), s.main, MAIN_P, "main", true);
-  modelForm(document.getElementById("reviewer"), s.reviewer, GATE_P, "reviewer", false);
+  const store = document.getElementById("store");
+  store.textContent = state.store_notice;
+  store.className = state.store === "keychain" ? "muted" : "notice warn";
+  modelForm(document.getElementById("main"), s.main, MAIN_P, "main", { isMain: true });
+  modelForm(document.getElementById("reviewer"), s.reviewer, GATE_P, "reviewer");
   const roles = document.getElementById("roles"); roles.textContent = "";
   for (const r of state.roles) {
     const cur = s.roles[r] || { mode: "off" };
-    const mode = select(["off", "reviewer", "custom"], cur.mode);
-    const sub = el("div");
+    const mode = select(["off", "main", "reviewer", "custom"], cur.mode, { off: "Off", main: "Main model", reviewer: "Same as reviewer", custom: "Custom endpoint" });
+    const sub = el("div", { className: "sub" });
     const draw = () => {
       sub.textContent = "";
-      if (mode.value === "custom") { if (!s.roles[r].model) s.roles[r] = { mode: "custom", model: { protocol: "chat", base_url: "", model: "", timeout_s: 120 } }; modelForm(sub, s.roles[r].model, GATE_P, "role." + r, false); }
+      if (mode.value === "custom") modelForm(sub, s.roles[r].model, GATE_P, "role." + r, { optional: true });
     };
-    mode.onchange = () => { s.roles[r] = mode.value === "custom" ? { mode: "custom", model: (s.roles[r] && s.roles[r].model) || { protocol: "chat", base_url: "", model: "", timeout_s: 120 } } : { mode: mode.value }; draw(); };
+    mode.onchange = () => {
+      s.roles[r] = mode.value === "custom" ? { mode: "custom", model: (s.roles[r] && s.roles[r].model) || emptyModel() } : { mode: mode.value };
+      draw();
+    };
     roles.append(row(r, mode), sub); draw();
   }
+  if (Object.values(s.roles).some((x) => x.mode !== "off")) document.getElementById("advanced").open = true;
   document.getElementById("timeout").value = s.human_timeout_s;
   document.getElementById("problems").textContent = state.problems.join("\n");
 }
-document.getElementById("save").onclick = async () => {
+async function save() {
   state.settings.human_timeout_s = Number(document.getElementById("timeout").value) || 120;
   try { state = await invoke("save_settings", { settings: state.settings }); document.getElementById("saved").textContent = "saved"; render(); }
-  catch (e) { document.getElementById("saved").textContent = String(e); }
-};
+  catch (e) { document.getElementById("saved").textContent = String(e); throw e; }
+}
+document.getElementById("save").onclick = () => save().catch(() => {});
 invoke("get_settings").then((s) => { state = s; render(); });

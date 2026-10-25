@@ -1,29 +1,50 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const log = document.getElementById("log");
-const add = (kind, text, image) => {
+const $ = (id) => document.getElementById(id);
+const add = (kind, text, image, extra) => {
   const d = document.createElement("div"); d.className = "ev " + kind; d.textContent = (kind === "tool" ? "→ " : "") + text;
   if (image) { const i = document.createElement("img"); i.src = "data:image/jpeg;base64," + image; d.appendChild(i); }
+  if (extra) d.appendChild(extra);
   log.appendChild(d); log.scrollTop = log.scrollHeight;
+  return d;
 };
+const running = (on, label) => { $("stop").disabled = !on; $("start").disabled = on; $("status").textContent = label || (on ? "running" : ""); };
 async function refresh() {
   const s = await invoke("get_settings");
-  document.getElementById("problems").textContent = s.problems.length ? "Before you start, open Settings:\n" + s.problems.join("\n") : "";
-  document.getElementById("start").disabled = s.problems.length > 0;
+  $("problems").textContent = s.problems.length ? "Before you start, open Settings:\n" + s.problems.join("\n") : "";
+  if ($("stop").disabled) $("start").disabled = s.problems.length > 0;
 }
-document.getElementById("settings").onclick = () => invoke("open_settings");
-document.getElementById("start").onclick = async () => {
-  const t = document.getElementById("task").value.trim(); if (!t) return;
-  log.textContent = ""; add("text", "Task: " + t);
-  try { await invoke("start_task", { task: t }); document.getElementById("stop").disabled = false; document.getElementById("start").disabled = true; document.getElementById("status").textContent = "running"; }
+async function start(t) {
+  try { await invoke("start_task", { task: t }); running(true); }
   catch (e) { add("error", String(e)); }
+}
+$("settings").onclick = () => invoke("open_settings");
+$("start").onclick = () => {
+  const t = $("task").value.trim(); if (!t) return;
+  log.textContent = ""; add("text", "Task: " + t); start(t);
 };
-document.getElementById("stop").onclick = () => invoke("stop_task");
+$("stop").onclick = () => invoke("stop_task");
 listen("agent", (e) => {
   const ev = e.payload;
-  if (ev.kind === "done" || ev.kind === "stopped") { document.getElementById("stop").disabled = true; document.getElementById("status").textContent = ev.kind; refresh(); return; }
-  if (ev.kind !== "ui_request") add(ev.kind, ev.text, ev.image);
+  if (ev.kind === "done") { $("status").textContent = ev.text === "aborted" ? "aborted" : "done"; return; }
+  if (ev.kind === "stopped") { running(false, ev.text); add("muted", "Agent " + ev.text); refresh(); return; }
+  if (ev.kind === "crashed") {
+    running(false, "crashed");
+    const b = document.createElement("button"); b.textContent = "Restart the task"; b.className = "primary";
+    b.onclick = async () => { b.disabled = true; add("text", "Restarting the task"); try { await invoke("restart_task"); running(true); } catch (err) { add("error", String(err)); } };
+    add("error", ev.text, null, document.createElement("br")).appendChild(b);
+    refresh();
+    return;
+  }
+  if (ev.kind === "gate_exit") { add("error", "The safety gate stopped: " + ev.text + "\nNo GUI action can run until the task is restarted."); return; }
+  if (ev.kind === "ui_request") return;
+  add(ev.status === "unknown" ? "gate unknown" : ev.kind, ev.text, ev.image);
 });
-listen("human", (e) => add("human", `asked the person (${e.payload.kind}): ${e.payload.outcome}`));
+// every person question ends in the timeline with its outcome; anything but a yes / an answer is a refusal
+listen("human", (e) => {
+  const p = e.payload;
+  add("human" + (p.refused ? " refused" : ""), `asked the person (${p.kind}): ${p.outcome}${p.refused ? " - counts as a refusal" : ""}`);
+});
 window.addEventListener("focus", refresh);
 refresh();

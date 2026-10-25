@@ -21,3 +21,7 @@ legend{font-weight:600}
 .bar{height:5px;background:#e6e9ec;border-radius:3px;overflow:hidden;margin:6px 0 12px}
 .bar div{height:100%;background:#1e785a;transition:width 1s linear}
 .btns{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.ev.refused{font-weight:600}.ev.unknown{color:#b3261e;font-weight:600}.ev.muted{color:#69737d}
+.notice{font-size:13px;margin:0 0 10px}.notice.warn{background:#fff4e5;border:1px solid #f0c27b;border-radius:6px;padding:8px;color:#7a4b00}
+details{border:1px solid #dde1e5;border-radius:8px;padding:10px;background:#fff}details summary{font-weight:600;cursor:pointer}
+.sub{margin-left:150px}
