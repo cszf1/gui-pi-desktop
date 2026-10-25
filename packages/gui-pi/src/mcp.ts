@@ -13,8 +13,9 @@ const CC = "io.modelcontextprotocol/clientCapabilities";
 const CI = "io.modelcontextprotocol/clientInfo";
 export const GG = "io.github.cszf1/gui-gate";
 const MAX_ROUNDS = 3;
-/** keys the model must never be able to set: they would let it answer for the person */
-export const FORBIDDEN_ARGS = ["inputResponses", "requestState", "gate_confirm", "gate_ack", "_meta"];
+/** keys the model must never be able to set: they would let it answer for the person (the last three are legacy
+ *  gate keys, stripped in case an old gate still reads them) */
+export const FORBIDDEN_ARGS = ["inputResponses", "requestState", "_meta", "gate_confirm", "gate_ack", "gate_task"];
 
 export type ElicitParams = {
   mode?: string;
@@ -22,7 +23,7 @@ export type ElicitParams = {
   requestedSchema: any;
   _meta?: Record<string, any>;
 };
-export type ElicitResult = { action: "accept" | "decline" | "cancel"; content?: Record<string, any> };
+export type ElicitResult = { action: "accept" | "decline" | "cancel"; content?: Record<string, any>; _meta?: Record<string, any> };
 export type AskHuman = (p: ElicitParams, signal?: AbortSignal) => Promise<ElicitResult>;
 
 export type ToolResult = {
@@ -148,7 +149,14 @@ export class McpClient {
     const args = cleanArgs(rawArgs);
     let params: Record<string, any> = { name, arguments: args };
     for (let round = 0; round <= MAX_ROUNDS; round++) {
-      const m = await this.request("tools/call", params);
+      let m: any;
+      try {
+        m = await this.request("tools/call", params);
+      } catch (e: any) {
+        // the gate died or stopped answering while the step was in flight: it may or may not have run. Never retried.
+        return { content: [{ type: "text", text: `[gui-pi] no result from gui-gate (${String(e?.message || e).slice(0, 300)}). ` +
+                 "The outcome of this step is unknown." }], isError: true, structuredContent: { status: "unknown", gate_lost: true } };
+      }
       if (m.error) return { content: [{ type: "text", text: `[gui-pi] gui-gate error ${m.error.code}: ${m.error.message}` }], isError: true };
       const r = m.result || {};
       if (r.resultType !== "input_required") return r;

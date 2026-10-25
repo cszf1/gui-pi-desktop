@@ -56,3 +56,23 @@ test("a dead socket is a decline", async () => {
   const r = await askIpc("/nonexistent/sock", "t", P("approve") as any);
   assert.equal(r.action, "decline");
 });
+
+const reason = (r: any) => r?._meta?.["io.github.cszf1/gui-gate"]?.reason;
+
+test("refusal reasons travel to the gate: timeout, unavailable, window closed", async () => {
+  const s = await shell(() => null);
+  assert.equal(reason(await askIpc(s.path, "tok", P("approve", 1) as any)), "timed_out");
+  s.close();
+  assert.equal(reason(await askIpc("/nonexistent/sock", "t", P("approve") as any)), "unavailable");
+  const c = await shell(() => ({ action: "cancel", reason: "closed" }));
+  const r = await askIpc(c.path, "tok", P("approve") as any);
+  assert.equal(r.action, "cancel");
+  assert.equal(reason(r), "closed");
+  c.close();
+  assert.equal(reason(sanitize("approve", { action: "decline", reason: "made-up" })), undefined);
+});
+
+test("coordinates pass through unchanged (the client never rescales x/y)", async () => {
+  const { cleanArgs } = await import("../src/mcp.ts");
+  assert.deepEqual(cleanArgs({ x: 1234.5, y: 77, pid: 1, window_id: 2, gate_confirm: "c", inputResponses: {} }), { x: 1234.5, y: 77, pid: 1, window_id: 2 });
+});

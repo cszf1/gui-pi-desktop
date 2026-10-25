@@ -23,11 +23,19 @@ export function timeoutOf(p: ElicitParams, dflt = 120): number {
 }
 
 const DECLINE: ElicitResult = { action: "decline" };
+/** Why a person's answer is a refusal; carried to the gate in the ElicitResult's _meta (the gate records it). */
+export const REASONS = ["declined", "cancelled", "timed_out", "closed", "unavailable"];
+
+export function refusal(action: "decline" | "cancel", reason?: string): ElicitResult {
+  const r: ElicitResult = { action };
+  if (reason && REASONS.includes(reason)) r._meta = { [GG]: { reason } };
+  return r;
+}
 
 /** Validate an answer against the kind's form; anything off is a decline. */
 export function sanitize(kind: Kind, r: any): ElicitResult {
   if (!r || typeof r !== "object") return DECLINE;
-  if (r.action !== "accept") return r.action === "cancel" ? { action: "cancel" } : DECLINE;
+  if (r.action !== "accept") return refusal(r.action === "cancel" ? "cancel" : "decline", typeof r.reason === "string" ? r.reason : undefined);
   const c = r.content || {};
   switch (kind) {
     case "approve":
@@ -57,12 +65,12 @@ export function askIpc(path: string, token: string, p: ElicitParams, signal?: Ab
       sock.destroy();
       resolve(r);
     };
-    const t = setTimeout(() => finish(DECLINE), (timeout + 2) * 1000);
-    signal?.addEventListener("abort", () => finish({ action: "cancel" }), { once: true });
+    const t = setTimeout(() => finish(refusal("decline", "timed_out")), (timeout + 2) * 1000);
+    signal?.addEventListener("abort", () => finish(refusal("cancel", "cancelled")), { once: true });
     // "tcp:127.0.0.1:PORT" (Windows) or a Unix socket path
     const tcp = path.match(/^tcp:([^:]+):(\d+)$/);
     const sock = tcp ? connect({ host: tcp[1], port: Number(tcp[2]) }) : connect(path);
-    sock.on("error", () => finish(DECLINE));
+    sock.on("error", () => finish(refusal("decline", "unavailable")));
     sock.on("connect", () => {
       sock.write(JSON.stringify({ token, id, kind, message: p.message, schema: p.requestedSchema, timeout_s: timeout,
                                   deadline_ms: p._meta?.[GG]?.deadline_ms, meta: p._meta?.[GG] || {} }) + "\n");
@@ -78,7 +86,7 @@ export function askIpc(path: string, token: string, p: ElicitParams, signal?: Ab
         finish(DECLINE);
       }
     });
-    sock.on("close", () => finish(DECLINE));
+    sock.on("close", () => finish(refusal("cancel", "cancelled"))); // the shell went away mid-question
   });
 }
 
@@ -136,10 +144,10 @@ export function makeAskHuman(env: NodeJS.ProcessEnv, getUi: () => any) {
       try {
         return await askPiUi(ui, p);
       } catch {
-        return DECLINE;
+        return refusal("decline", "unavailable");
       }
     }
-    return DECLINE;
+    return refusal("decline", "unavailable");
   };
   return { ask, log: script?.log || [] };
 }

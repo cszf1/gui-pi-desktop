@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { prune, obsKind, withPlanLine } from "../src/context.ts";
+import { prune, obsKind, obsMeta, diffNote, ORPHAN_NOTE } from "../src/context.ts";
 
 const read = (snap: string, rows: number, img = false, w = 777) => ({
   role: "toolResult", toolName: "get_window_state",
@@ -8,10 +8,10 @@ const read = (snap: string, rows: number, img = false, w = 777) => ({
             ...(img ? [{ type: "image", data: "AAAA", mimeType: "image/jpeg" }] : [])],
   details: { windowKey: `4242:${w}` },
 });
-const act = (snap: string, diff: boolean, w = 777) => ({
+const act = (snap: string, diff: boolean, w = 777, base = "s1") => ({
   role: "toolResult", toolName: "click",
   content: [{ type: "text", text: `Clicked.\n[gate] Window right after the action (snapshot ${snap}; tokens are ${snap}:N, older tokens are stale).` +
-    (diff ? ` Only rows that changed since snapshot s1 are shown (1 of 9 rows, with their parents);` : "") + `\n    - [0] button "x"` }],
+    (diff ? ` Only rows that changed since snapshot ${base} are shown (1 of 9 rows, with their parents);` : "") + `\n    - [0] button "x"` }],
   details: { windowKey: `4242:${w}` },
 });
 
@@ -22,13 +22,60 @@ test("kinds", () => {
   assert.equal(obsKind({ role: "toolResult", toolName: "gate_report", content: [{ type: "text", text: "x" }] } as any), null);
 });
 
-test("the anchor a later diff builds on stays verbatim", () => {
-  const msgs: any[] = [{ role: "user", content: [{ type: "text", text: "do it" }] }, read("s0", 5), read("s1", 9), act("s2", true), act("s3", true)];
+test("the chain of bases a diff builds on stays verbatim (old gate text)", () => {
+  const msgs: any[] = [{ role: "user", content: [{ type: "text", text: "do it" }] }, read("s0", 5), read("s1", 9), act("s2", true), act("s3", true, 777, "s2")];
   const out = prune(msgs);
   assert.match(out[1].content[0].text, /older window read summarised/); // before the anchor
   assert.equal(out[2], msgs[2]); // the anchor
-  assert.equal(out[3], msgs[3]);
+  assert.equal(out[3], msgs[3]); // s3 builds on s2
   assert.equal(out[4], msgs[4]);
+});
+
+test("a diff on an older base: an intermediate diff that is not on the chain is summarised", () => {
+  const msgs: any[] = [read("s1", 9), act("s2", true, 777, "s1"), act("s3", true, 777, "s1")];
+  const out = prune(msgs);
+  assert.equal(out[0], msgs[0]);
+  assert.match(out[1].content[0].text, /summarised/);
+  assert.equal(out[2], msgs[2]);
+});
+
+const sdiff = (snap: string, base: string, extra: any = {}) => ({
+  role: "toolResult", toolName: "click",
+  content: [{ type: "text", text: `Clicked.\n[gate] Window right after the action (snapshot ${snap}; tokens are ${snap}:N).\n    - [0] button "x"` }],
+  details: { windowKey: "4242:777", obs: { kind: "diff", snapshot: snap, base, ...extra } },
+});
+
+test("structured diffs: base_snapshot_id decides what is kept, wherever the base is", () => {
+  const msgs: any[] = [read("s1", 9), read("s2", 9), sdiff("s3", "s1")];
+  const out = prune(msgs);
+  assert.equal(out[0], msgs[0]); // the base, although s2 is a newer full read
+  assert.match(out[1].content[0].text, /summarised/);
+  assert.equal(out[2], msgs[2]);
+});
+
+test("a diff whose base is no longer in context stays full and is marked", () => {
+  const msgs: any[] = [{ role: "user", content: [{ type: "text", text: "summary" }] }, sdiff("s9", "s4")];
+  const out = prune(msgs);
+  assert.match(out[1].content[0].text, /Clicked/);
+  assert.equal(out[1].content.at(-1).text, ORPHAN_NOTE("s4"));
+  assert.equal(prune(out)[1].content.filter((c: any) => /no longer in context/.test(c.text)).length, 1); // idempotent
+});
+
+test("obsMeta reads the new structured diff and the old text", () => {
+  const sc = { diff: { base_snapshot_id: "s5", snapshot_id: "s6", changed: [1], removed: [], reordered: [] } };
+  assert.deepEqual(obsMeta("click", "Clicked.", sc), { kind: "diff", snapshot: "s6", base: "s5" });
+  const t = act("s3", true, 777, "s2").content[0].text;
+  assert.deepEqual(obsMeta("click", t), { kind: "diff", snapshot: "s3", base: "s2" });
+  assert.deepEqual(obsMeta("get_window_state", "window_id=1 pid=2 snapshot_id=s7\n"), { kind: "full", snapshot: "s7", base: null });
+  assert.equal(obsMeta("set_plan", "ok"), null);
+});
+
+test("removed and reordered rows are made explicit", () => {
+  const n = diffNote({ base_snapshot_id: "s5", snapshot_id: "s6", removed: [3, { index: 7, row: 'button "OK"' }], reordered: [{ from: 9, to: 8 }] });
+  assert.match(n, /rows gone since snapshot s5: \[3\]; \[7\] button "OK"/);
+  assert.match(n, /renumbered \(\[9\] -> \[8\]\)/);
+  assert.equal(diffNote({ base_snapshot_id: "s5", removed: [], reordered: false }), "");
+  assert.match(diffNote({ removed: 2, reordered: true }), /2 rows.*renumbered/);
 });
 
 test("a new full read becomes the anchor; windows are independent", () => {
@@ -55,9 +102,3 @@ test("at most three windows keep a screenshot, the most recent ones", () => {
   assert.deepEqual(imgs(prune(msgs)), [false, true, true, true]);
 });
 
-test("plan line goes on the newest tool result unless the gate printed one", () => {
-  const msgs: any[] = [read("s1", 2)];
-  assert.match(withPlanLine(msgs, "[client: plan 1/3]")[0].content.at(-1).text, /plan 1\/3/);
-  const g: any[] = [{ role: "toolResult", toolName: "click", content: [{ type: "text", text: "ok\n[plan] 1/3 done" }] }];
-  assert.equal(withPlanLine(g, "[client: plan 1/3]"), g);
-});
