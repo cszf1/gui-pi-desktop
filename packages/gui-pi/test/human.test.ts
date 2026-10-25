@@ -1,0 +1,58 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createServer } from "node:net";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { askIpc, sanitize } from "../src/human.ts";
+
+const P = (kind: string, timeout = 5) => ({ message: "m", requestedSchema: {}, _meta: { "io.github.cszf1/gui-gate": { kind, timeout_s: timeout } } });
+
+test("sanitize: only well-formed accepts pass", () => {
+  assert.deepEqual(sanitize("approve", { action: "accept", content: { decision: "allow" } }), { action: "accept", content: { decision: "allow" } });
+  assert.equal(sanitize("approve", { action: "accept", content: { decision: "yes" } }).action, "decline");
+  assert.equal(sanitize("takeover", { action: "accept", content: { done: "true" } }).action, "decline");
+  assert.equal(sanitize("answer", { action: "accept", content: { answer: "  " } }).action, "decline");
+  assert.equal(sanitize("ask_help", { action: "accept", content: { choice: "did_it" } }).content!.choice, "did_it");
+  assert.equal(sanitize("approve", null).action, "decline");
+});
+
+function shell(reply: (req: any) => any) {
+  const path = join(mkdtempSync(join(tmpdir(), "ipc-")), "h.sock");
+  const seen: any[] = [];
+  const srv = createServer((sock) => {
+    let buf = "";
+    sock.on("data", (d) => {
+      buf += d;
+      const i = buf.indexOf("\n");
+      if (i < 0) return;
+      const req = JSON.parse(buf.slice(0, i));
+      seen.push(req);
+      const r = reply(req);
+      if (r) sock.write(JSON.stringify({ id: req.id, ...r }) + "\n");
+    });
+  });
+  return new Promise<{ path: string; seen: any[]; close: () => void }>((res) => srv.listen(path, () => res({ path, seen, close: () => srv.close() })));
+}
+
+test("ipc round trip carries the token and the kind", async () => {
+  const s = await shell((req) => (req.token === "tok" ? { action: "accept", content: { done: true } } : { action: "decline" }));
+  const r = await askIpc(s.path, "tok", P("takeover") as any);
+  assert.deepEqual(r, { action: "accept", content: { done: true } });
+  assert.equal(s.seen[0].kind, "takeover");
+  s.close();
+});
+
+test("no answer before the deadline is a decline", async () => {
+  const s = await shell(() => null);
+  const t0 = Date.now();
+  const r = await askIpc(s.path, "tok", P("approve", 1) as any);
+  assert.equal(r.action, "decline");
+  assert.ok(Date.now() - t0 < 6000);
+  s.close();
+});
+
+test("a dead socket is a decline", async () => {
+  const r = await askIpc("/nonexistent/sock", "t", P("approve") as any);
+  assert.equal(r.action, "decline");
+});

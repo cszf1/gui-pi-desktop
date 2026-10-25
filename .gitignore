@@ -1,0 +1,4 @@
+desktop/target/
+node_modules/
+dist/
+desktop/src-tauri/gen/

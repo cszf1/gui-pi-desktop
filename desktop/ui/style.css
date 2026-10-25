@@ -1,0 +1,23 @@
+body{font-family:system-ui,sans-serif;margin:0;background:#f6f7f8;color:#1d2125}
+header{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#1e785a;color:#fff}
+header h1{font-size:16px;margin:0;flex:1}
+button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid #c5cbd1;background:#fff;cursor:pointer}
+button.primary{background:#1e785a;color:#fff;border-color:#1e785a}
+button.danger{background:#b3261e;color:#fff;border-color:#b3261e}
+main{padding:12px 14px}
+textarea,input,select{font:inherit;padding:6px;border:1px solid #c5cbd1;border-radius:6px;box-sizing:border-box}
+textarea{width:100%;height:70px}
+#log{margin-top:10px;background:#fff;border:1px solid #dde1e5;border-radius:8px;height:430px;overflow:auto;padding:8px;font-size:13px}
+.ev{padding:3px 0;border-bottom:1px solid #f0f2f4;white-space:pre-wrap}
+.ev.gate{color:#8a4b00}.ev.text{color:#0b5394;font-weight:600}.ev.error{color:#b3261e}.ev.human{color:#5b2a86}
+.ev img{max-width:220px;display:block;margin-top:4px;border:1px solid #ddd}
+fieldset{border:1px solid #dde1e5;border-radius:8px;margin:0 0 12px;padding:10px;background:#fff}
+legend{font-weight:600}
+.row{display:grid;grid-template-columns:140px 1fr;gap:6px 10px;align-items:center;margin:4px 0}
+.problems{color:#b3261e;font-size:13px;white-space:pre-wrap}
+.muted{color:#69737d;font-size:12px}
+.pop{padding:16px}
+.pop p{white-space:pre-wrap;margin:0 0 12px}
+.bar{height:5px;background:#e6e9ec;border-radius:3px;overflow:hidden;margin:6px 0 12px}
+.bar div{height:100%;background:#1e785a;transition:width 1s linear}
+.btns{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}

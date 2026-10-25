@@ -1,0 +1,13 @@
+{
+  "name": "gui-pi",
+  "version": "0.1.0",
+  "description": "Pi extension: gui-gate MCP client (2026-07-28 + MRTR), context strategy, ask-a-person bridge",
+  "type": "module",
+  "main": "index.ts",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "pi": { "extensions": ["./index.ts"] },
+  "engines": { "node": ">=22.18" }
+}

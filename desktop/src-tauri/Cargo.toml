@@ -1,0 +1,21 @@
+[package]
+name = "gui-pi-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Desktop computer-use agent: Pi + gui-gate + cua-driver"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+gpd-core = { path = "../core" }
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust", "windows-native", "apple-native"] }
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+
+[features]
+# test builds only: GUI_PI_HUMAN_AUTO answers popups by script (the popup is still shown)
+test-hooks = []
