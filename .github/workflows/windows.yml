@@ -71,7 +71,7 @@ jobs:
         with: {python-version: "3.12"}
       - uses: sigstore/cosign-installer@v3
       - uses: Swatinem/rust-cache@v2
-        with: {workspaces: "desktop -> target", key: windows-${{ matrix.variant }}}
+        with: {workspaces: "desktop -> target", key: "windows-${{ matrix.variant }}"}
       - name: stage resources (node win-x64, Pi lock, gui-gate.exe, Cua Driver 0.38.0 windows-x86_64, all by SHA256 + Sigstore)
         env: {REQUIRE_SIG: "1"}
         run: scripts/stage-resources.sh "$GITHUB_WORKSPACE/gate" windows-x86_64 "$GITHUB_WORKSPACE/gate-bin/gui-gate.exe"
