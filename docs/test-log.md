@@ -119,3 +119,59 @@
 ### 本次模型花费
 
 主模型 qwen3.8-flash：161 次调用记录，input 263k（另 cache_read 1.69M）、output 30.5k tokens；审核模型调用个位数（t7 等）。
+
+## 2026-10-26 复测（缺陷 B1-B11 修复后 + 第 1 轮新问题修复后）
+
+- 构建：第 1 轮 `build-0c12ff8` / `-testhooks`（desktop 0c12ff8，修 B1-B11）；第 2 轮 `build-49b621a` / `-testhooks`（49b621a：无人回答文案、过期问题不算重复、弹窗自适应高度）与 `build-4f661d5` / `-testhooks`（4f661d5：弹窗自适应真正生效）。三版都内置 gui-gate main **0cae275**（未打 tag；包内 gui-gate sha256 前缀 58be1b6a）。版本号仍 0.3.0。
+- 测试机、模型、夹具、验证方式同上一节（主模型 qwen3.8-flash @tokenrhythm，审核 decision-model-preview，问人超时 30 s）。**不再有任何绕过**：安装时删除了 B1 的 auth.json 绕过。
+- 证据：gui-pi5 `/data/workspace/runs/r031/<运行>/`（gate/agent/human.jsonl 切片、run.out、run.err、shots/）；截图另存 `/workspace/work/gp5/r031/r2-*.{png,jpg}`。
+- 测试工具问题（非产品）：第一次接管复测（tk2）中，截图脚本对正在关闭的弹窗执行 `import -window <id>`，持有 X server grab 把整个 Xvfb 卡住约 4 分钟，期间驱动 `get_window_state` 超时，该次结果作废；截图改为根窗口裁剪 + 超时后重跑（tk3）。
+
+### 新修复（第 1 轮发现）
+
+| 编号 | 问题 | 修复提交 | 结果 | 验证方式 | 证据 | 日期 |
+|---|---|---|---|---|---|---|
+| N1 | 时间线把超时写成 "(refused)"，弹窗写 "no answer counts as 'no'" | 49b621a | 过 | 真模型 + 单元 | 时间线：`person: no answer (timed out) - not a refusal; the step was not done.` + `asked the person (approve): no answer (timed out) - not a refusal; the step was not done`（`r2-timeline-noanswer.jpg`，a_to3/gto）；弹窗倒计时：approve “if nobody answers, the step is not done”，clarify “…nothing is chosen and the step is not done”，takeover “…the step stays undone”，help “…the agent gets no help and does not go on with this step”；设置页说明同步；给模型的提示区分 declined（“That is a no”）与无人回答（“No answer is not a refusal by the person, but the step was NOT done”）。动作仍未执行（gatelab 只有 start，文件还在）。rpc 单元测试改为新文案；扩展 57/57 | 2026-10-26 |
+| N2 | 队列里过期（从未显示）的问题让下一个相同问题被标 repeated | 49b621a | 过 | 脚本(IPC) + 单元 | x2：同一 help 问题先在接管弹窗后面过期（`expired, shown:false, repeated:false`），再次发出并显示 → `repeated:false`；human_summary `repeated 0`（第 1 轮 x1 同场景是 `repeated:true`）。单元 `an_expired_question_does_not_make_the_next_same_question_a_repeat` | 2026-10-26 |
+| N3 | 接管弹窗固定 300 px 高，倒计时被截断 | 49b621a（自适应 + popup_fit）、4f661d5（GTK 非可调窗口忽略 resize，改为可调 + min=max 固定） | 过（第 2 次修好） | 真模型 + 脚本(IPC) | 49b621a 上 popup_fit 无效（窗口保持初始 380/420）；4f661d5 上 run.err `[popup] ... fit to 480xH (content H, ok true)`：approve 300、clarify 292、takeover 334 / 436、help 272，四种截图底部倒计时完整（`r2-popup-{approve,clarify,takeover,help}.png`）。takeover 内容 334 px > 300，正是第 1 轮截断原因 | 2026-10-26 |
+
+### 完整复测结果（含第 1 轮已过项）
+
+| 项 | 结果 | 验证方式 | 证据（runs/r031/…） | 日期 |
+|---|---|---|---|---|
+| 预发布下载 + `sha256sum -c`（4 个构建 × AppImage/deb） | 过 | 脚本 | dl2.sh：全部 OK；`resources.SHA256SUMS` 与安装后的一致 | 2026-10-26 |
+| 自检 deb / AppImage / AppImage-testhooks（B3、B4） | 过 | 实机 | 三者都 DBus ok、AT-SPI ok、`All 15053 bundled files match`（49b621a、4f661d5 均复验） | 2026-10-26 |
+| 主模型密钥经 `$GUI_PI_MAIN_KEY` 可用，无绕过（B1） | 过 | 真模型 | 删除 auth.json 后所有任务正常；s1/s2 成功 | 2026-10-26 |
+| 模型调用出错显示为错误（B2） | 过 | 真模型 | e1（错误模型名）：exit 4，时间线 `model request failed: 400 MODEL_NOT_AVAILABLE`，状态 error | 2026-10-25 |
+| 设置页【测试连接】（B5） | 过 | 实机 | 主模型 `ok - qwen3.8-flash answered`（`r2-b5-main.jpg`）；审核模型也显示结果（`r2-b5-rev.jpg`）。注意：测试连接会先保存表单 | 2026-10-26 |
+| 【Save key】保留未保存内容（B6） | 过 | 实机 | 模型名改成 `qwen3.8-flash-UNSAVED`（未保存）→ 输入密钥点 Save key → 字段仍是 `-UNSAVED`，config.json 仍是 `qwen3.8-flash`，密钥占位显示已设置（`r2-b5b6.jpg`） | 2026-10-26 |
+| 主窗口提示刷新（B10） | 过 | 实机 | config 清空模型名 → 主窗口“Main model: model name is required”（`r2-b10-before.jpg`）→ 设置页填回并 Save → 主窗口提示立即消失，无需重启（`r2-b10-after.jpg`）；启动后不再停在 “Still checking…”（`r2-main.jpg`） | 2026-10-26 |
+| 成功任务（deb，GUI） | 过 | 真模型 | s2：点 Increment 两次，计数 2，时间线完整（`r2-s2.jpg`）；s1（第 1 轮）同样 | 2026-10-26 |
+| AppImage 内真模型任务 | 过（模型多点一次） | 真模型 | ai：正常版 AppImage `--run`，exit 0，自检 bundle 匹配；模型点了 3 次（第 3 次是 gate 重绑旧 token 后执行），回答中如实说明“one duplicate click of mine landed”（O4） | 2026-10-26 |
+| run_actions 遇加载中停下（O1 修复） | 过 | 真模型 + 脚本(fake_driver) | ra：批量 4 步在第 2 步被拒（Loading 中、token 失效）→ `batch stopped after 1 of 4 steps`；第二批在新对话框出现时停 → `STOPPED: step 2 opened a new window/dialog`；gatelab 记录与模型报告一致（计数 2）。gate 0cae275 测试 `test_batch_stops_while_the_window_is_loading` 等 | 2026-10-26 |
+| gate 0cae275 测试跑包内二进制 | 过 | 脚本(fake_driver) | `GUI_GATE_BIN=/usr/lib/gui-pi-desktop/resources/gui-gate`：test_v04 + test_actions_e2e + test_remaining + test_security_e2e 共 130 tests OK（`/data/workspace/e2e3.log`） | 2026-10-26 |
+| ask_human 超时（B7 + N1） | 过 | 真模型 | a_to2/a_to3：gate `human_outcome timeout`、`person_burden label no_answer`；human.jsonl `timed out`；模型对用户说 “nobody answered within 30 seconds” | 2026-10-26 |
+| ask_human 允许 / 拒绝 / 关窗 | 过 | 真模型 | a_yes：`direct tier=human`，文件删除；a_no：denied；a_close：gate `window_closed`（第 1 轮） | 2026-10-25 |
+| clarify 回答 / 超时 | 过 | 真模型 | c3、c_ans：答 Shuffle labels → 只点 Shuffle labels；c_to：超时，无动作 | 2026-10-26 |
+| takeover 完成 / 拒绝（B11） | 过 | 真模型 | tk3：`done by the person` 后 `declined`，gate 不重放 type_text；正文不再出现 “press Allow / Deny” | 2026-10-26 |
+| help（IPC） | 过 | 脚本(IPC) | x3：显示后 8 s 自动 “Give a hint” → `try_other` + note | 2026-10-26 |
+| 队列中过期问题有记录（B8） | 过 | 脚本(IPC) | x1/x2：`expired, shown:false`，human_summary `expired 1` | 2026-10-26 |
+| 客户端标记（B9） | 过 | 真模型 | 本轮所有运行 `client_tool_unmarked` = 0 | 2026-10-26 |
+| Stop：gate_reset | 过 | 真模型 | stop（4f661d5，两次）：gate 切片最后一条 `{"ev":"reset",...}` | 2026-10-26 |
+| Stop：进程全结束 | 过 | 真模型 | 停止前 `pi`、`gui-gate`、`cua-driver mcp` 同一进程组；停止后 0 个 | 2026-10-26 |
+| Stop：停止后 0 动作 | 过 | 真模型 | 两次都在点 2 次时停止，10 s 后仍 2；reset 之后 0 个 action | 2026-10-26 |
+| Stop：新任务 = 新进程 | 过 | 真模型 | 进程组 42307 → 42489；human_summary `end: stopped` | 2026-10-26 |
+| 密钥泄漏扫描 | 过 | 脚本 | leak.sh：配置/数据/缓存/运行目录 + runs/r031 + /tmp 应用日志，两把密钥全值与 20 字符片段 0 命中；临时副本已删除 | 2026-10-26 |
+| tokens_src: client_usage | 过 | 真模型 | `gui-gate costs`（a_to3 + tk3 + t7）：ask_human `tokens 8178, client_usage`，handoff `652.3, client_usage`；review 无中间轮次 → pixel_estimate | 2026-10-26 |
+| 回归 t7（审核模型允许） | 过 | 真模型 | Send report：trail `reviewer_allow, direct`，gatelab 只有 Send report | 2026-10-26 |
+| 回归 t12（循环提示） | 过 | 真模型 | loop_breaker level 1（two_strikes）、level 2（state_repeat）；计数 5 正确；本次模型没多点，stop_loop 未触发 | 2026-10-26 |
+| 四种弹窗截图（修后） | 过 | 真模型 + 脚本(IPC) | `r2-popup-approve.png`、`r2-popup-clarify.png`、`r2-popup-takeover.png`、`r2-popup-help.png` | 2026-10-26 |
+
+### 本轮剩余问题 / 观察
+
+- R1（gui-gate，低，测试不稳定）：CI 中 `jobs::tests::no_orphans_no_logs` 偶发失败（`log left on disk: /tmp/gui-gate-job-<pid>-1.log`），同一进程里另一个测试的 job 1 用了同名日志文件。重跑通过。未修（只是测试问题）。
+- R2（低）：human.jsonl 的 `refused` 字段对超时/过期仍为 true（gui-pi-human/1 模式字段，未改以保持兼容）；含义以 `outcome` 为准。
+- R3（观察）：设置页【测试连接】会先保存整张表单（B5 修复的做法），所以未保存的改动也会被保存。
+- R4（观察）：设置页密钥占位显示末 4 位（`set (...XXXX)`）。
+- O3 仍在：模型常用 run_command 读夹具源码。O4：AppImage 运行中模型多点了一次 Increment（模型行为，已如实报告）。
+- 本轮模型花费（第 2 轮 15 个切片）：154 次 usage，input 264k、output 28.9k、cache_read 1.55M tokens。
