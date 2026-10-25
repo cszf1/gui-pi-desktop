@@ -20,8 +20,11 @@ test("store: bytes unchanged, private files, ids continue after a restart, pins 
   assert.equal(a, "img-1");
   assert.equal(s.get(a)!.data, IMG);
   assert.deepEqual(readFileSync(join(dir, "img-1.bin")), Buffer.from(IMG, "base64"));
-  assert.equal(statSync(join(dir, "img-1.bin")).mode & 0o777, 0o600);
-  assert.equal(statSync(dir).mode & 0o777, 0o700);
+  if (process.platform !== "win32") {
+    // Windows has no mode bits: the files sit in the user's own profile, private by its ACL
+    assert.equal(statSync(join(dir, "img-1.bin")).mode & 0o777, 0o600);
+    assert.equal(statSync(dir).mode & 0o777, 0o700);
+  }
   for (let i = 0; i < 4; i++) s.save(IMG, "image/jpeg", "1:2", "click");
   assert.equal(new ImageStore(dir).save(IMG, "image/jpeg", "1:2", "x"), "img-6");
   assert.equal(s.get("../../etc/passwd"), null);

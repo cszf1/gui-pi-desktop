@@ -6,6 +6,13 @@ import { fileURLToPath } from "node:url";
 import ext from "../index.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+export const WIN = process.platform === "win32";
+
+/** A listen address for a fake shell IPC: a Unix socket in a fresh temp dir, a named pipe on Windows. */
+export function ipcPath(tag: string): string {
+  if (WIN) return `\\\\.\\pipe\\gpd-test-${tag}-${process.pid}-${Math.random().toString(16).slice(2)}`;
+  return join(mkdtempSync(join(tmpdir(), `${tag}-`)), "h.sock");
+}
 
 export class MockPi {
   handlers: Record<string, any[]> = {};
@@ -39,9 +46,13 @@ export class MockPi {
 export async function load(cfg: any, env: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "guipi-h-"));
   const rec = join(dir, "rec.jsonl");
-  const gate = join(dir, "gate.sh");
-  writeFileSync(gate, `#!/bin/sh\nexec "${process.execPath}" "${join(HERE, "fake_gate.mjs")}" "$@"\n`);
-  chmodSync(gate, 0o755);
+  // Windows cannot run a #! wrapper: the extension starts a gate given as a .mjs with node itself
+  let gate = join(HERE, "fake_gate.mjs");
+  if (!WIN) {
+    gate = join(dir, "gate.sh");
+    writeFileSync(gate, `#!/bin/sh\nexec "${process.execPath}" "${join(HERE, "fake_gate.mjs")}" "$@"\n`);
+    chmodSync(gate, 0o755);
+  }
   const fullEnv: NodeJS.ProcessEnv = {
     PATH: process.env.PATH || "/usr/bin:/bin", HOME: dir, GUI_PI_GATE: gate,
     GUI_GATE_FAKE_CFG: JSON.stringify(cfg), GUI_GATE_FAKE_REC: rec, ...env,

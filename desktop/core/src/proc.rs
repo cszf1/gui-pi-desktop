@@ -46,6 +46,10 @@ pub const STOP_GRACE: Duration = Duration::from_secs(5);
 
 pub struct Agent {
     child: Arc<Mutex<Child>>,
+    /// Windows: the Job Object Pi was put in right after start; every process it starts (node -> gui-gate -> driver)
+    /// is in it too, and killing the job ends them all (the Windows counterpart of the unix process group)
+    #[cfg(windows)]
+    job: winjob::Job,
     stdin: Mutex<Option<ChildStdin>>,
     stop_requested: Arc<AtomicBool>,
     settled: Arc<AtomicBool>,
@@ -63,10 +67,26 @@ pub fn spawn(program: &Path, args: &[String], env: &[(String, String)], cwd: Opt
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
+    // Windows: no console window for node (the app is a GUI program), and a Job Object for the whole tree (below)
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(winjob::CREATE_NO_WINDOW);
+    }
     if let Some(d) = cwd {
         cmd.current_dir(d);
     }
     let mut child = cmd.spawn()?;
+    #[cfg(windows)]
+    let job = match winjob::Job::new().and_then(|j| j.assign(&child).map(|_| j)) {
+        Ok(j) => j,
+        Err(e) => {
+            // without the job Stop could leave the gate or the driver running: refuse to run
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e);
+        }
+    };
     let stdin = child.stdin.take();
     let mut stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
@@ -155,7 +175,7 @@ pub fn spawn(program: &Path, args: &[String], env: &[(String, String)], cwd: Opt
         on_event(AgentEvent::Exited { code, reason, stderr_tail });
     });
 
-    Ok(Agent { child, stdin: Mutex::new(stdin), stop_requested, settled, exited })
+    Ok(Agent { child, #[cfg(windows)] job, stdin: Mutex::new(stdin), stop_requested, settled, exited })
 }
 
 impl Agent {
@@ -206,6 +226,8 @@ impl Agent {
             // the group id is Pi's pid (process_group(0)); negative = the whole group
             libc::kill(-(c.id() as i32), libc::SIGKILL);
         }
+        #[cfg(windows)]
+        self.job.terminate();
         let _ = c.kill();
     }
 
@@ -215,8 +237,64 @@ impl Agent {
     pub fn has_exited(&self) -> bool {
         self.exited.load(Ordering::SeqCst)
     }
+    /// Windows: processes still in the agent's job (Pi and everything it started)
+    #[cfg(windows)]
+    pub fn job_processes(&self) -> u32 {
+        self.job.active()
+    }
     pub fn pid(&self) -> u32 {
         self.child.lock().unwrap_or_else(|e| e.into_inner()).id()
+    }
+}
+
+/// Windows Job Object: Pi is assigned right after start and everything it starts (node -> gui-gate -> driver, and
+/// what they run) inherits the job; Stop calls TerminateJobObject, the counterpart of killing the unix process group.
+/// No KILL_ON_JOB_CLOSE: like on Linux, a task that ends normally leaves apps the agent opened for the person running.
+#[cfg(windows)]
+pub(crate) mod winjob {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
+        QueryInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION};
+
+    pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    pub struct Job(HANDLE);
+    // the handle is only used through the Win32 calls below, which are thread-safe
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    impl Job {
+        pub fn new() -> std::io::Result<Job> {
+            let h = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+            if h.is_null() { Err(std::io::Error::last_os_error()) } else { Ok(Job(h)) }
+        }
+        pub fn assign(&self, child: &std::process::Child) -> std::io::Result<()> {
+            let ok = unsafe { AssignProcessToJobObject(self.0, child.as_raw_handle() as HANDLE) };
+            if ok == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+        }
+        pub fn terminate(&self) {
+            unsafe {
+                TerminateJobObject(self.0, 1);
+            }
+        }
+        /// processes alive in the job now (tests, diagnostics)
+        pub fn active(&self) -> u32 {
+            unsafe {
+                let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = std::mem::zeroed();
+                let ok = QueryInformationJobObject(self.0, JobObjectBasicAccountingInformation, &mut info as *mut _ as *mut _,
+                                                   std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32, std::ptr::null_mut());
+                if ok == 0 { 0 } else { info.ActiveProcesses }
+            }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
     }
 }
 
@@ -409,5 +487,31 @@ mod tests {
         assert!(env_line.contains(":this:none"), "{env_line}");
         let n: usize = env_line.split(':').nth(1).unwrap().parse().unwrap();
         assert!(n <= 5, "{env_line}");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod win_tests {
+    use super::*;
+
+    /// Stop on Windows ends the child and its grandchildren (the Job Object), like the process group on unix.
+    #[test]
+    fn kill_tree_ends_grandchildren() {
+        let on: OnEvent = Arc::new(|_| {});
+        let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+        let cmd = std::path::PathBuf::from(&sysroot).join("System32").join("cmd.exe");
+        let env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| k.eq_ignore_ascii_case("SystemRoot") || k.eq_ignore_ascii_case("Path")).collect();
+        let a = spawn(&cmd, &["/c".into(), "start /b ping -n 60 127.0.0.1 >NUL & ping -n 60 127.0.0.1 >NUL".into()], &env, None, on).unwrap();
+        let t0 = Instant::now();
+        while a.job_processes() < 3 && t0.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(a.job_processes() >= 3, "cmd + two pings expected, got {}", a.job_processes());
+        a.kill_tree();
+        let t0 = Instant::now();
+        while a.job_processes() > 0 && t0.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(a.job_processes(), 0, "processes of the agent survived Stop");
     }
 }

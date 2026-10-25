@@ -4,7 +4,7 @@
 //   with `inputRequests` (elicitation/create, mode form) and an opaque `requestState`; we ask the person through
 //   `askHuman` and retry the same call with a NEW id, `inputResponses` and the exact `requestState`.
 // - the model only ever controls `arguments`; keys the gate reads from the params top level are stripped from them.
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 
 export const PROTOCOL = "2026-07-28";
@@ -69,7 +69,10 @@ export class McpClient {
   }
 
   start(cmd: string, args: string[], env: NodeJS.ProcessEnv) {
-    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env });
+    // a gate given as a node script (dev runs, the tests' fake gate on Windows, where a #! wrapper cannot run)
+    const script = /\.(mjs|cjs|js)$/i.test(cmd);
+    const child = spawn(script ? process.execPath : cmd, script ? [cmd, ...args] : args,
+                        { stdio: ["pipe", "pipe", "pipe"], env, windowsHide: true });
     this.child = child;
     const rl = createInterface({ input: child.stdout! });
     rl.on("line", (line) => this.onLine(line));
@@ -214,8 +217,19 @@ export class McpClient {
     this.stopped = true;
     for (const p of this.pending.values()) p.reject(new Error("stopped by the user"));
     this.pending.clear();
-    try {
-      this.child?.kill("SIGKILL");
-    } catch {}
+    killTree(this.child);
   }
+}
+
+/** Kill the gate and what it started: on Windows `taskkill /T` (the driver is the gate's child; a plain kill there
+ *  ends only the gate), elsewhere SIGKILL (the gate's own shutdown cannot run, but the shell's Stop also kills the
+ *  whole process group / Job Object). */
+export function killTree(child: ChildProcess | undefined, platform: string = process.platform) {
+  if (!child || child.exitCode !== null) return;
+  try {
+    if (platform === "win32" && child.pid) spawnSync("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, timeout: 5000 });
+  } catch {}
+  try {
+    child.kill("SIGKILL");
+  } catch {}
 }

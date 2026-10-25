@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { ipcPath } from "./harness.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:net";
 import { mkdtempSync } from "node:fs";
@@ -18,7 +19,7 @@ test("sanitize: only well-formed accepts pass", () => {
 });
 
 function shell(reply: (req: any) => any) {
-  const path = join(mkdtempSync(join(tmpdir(), "ipc-")), "h.sock");
+  const path = ipcPath("ipc");
   const seen: any[] = [];
   const srv = createServer((sock) => {
     let buf = "";

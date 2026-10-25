@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { load, txt } from "./harness.ts";
+import { load, txt, ipcPath, WIN } from "./harness.ts";
 import { UsageBook } from "../src/usage.ts";
 
 test("usage: the assistant message's real usage goes with its first tool call, zeros with the others", async () => {
@@ -33,7 +33,7 @@ test("usage: the assistant message's real usage goes with its first tool call, z
 /** The shell's side of the stop channel: answers gate_env with {}, keeps watch_stop open, sends stop on demand. */
 function fakeShell() {
   const dir = mkdtempSync(join(tmpdir(), "stop-"));
-  const path = join(dir, "h.sock");
+  const path = WIN ? ipcPath("stop") : join(dir, "h.sock");
   let watcher: any = null;
   const acks: any[] = [];
   const socks: any[] = [];

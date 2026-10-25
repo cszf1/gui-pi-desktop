@@ -8,7 +8,8 @@ import { McpClient } from "../src/mcp.ts";
 import { scripted } from "../src/human.ts";
 
 const GG = process.env.GUI_GATE_SRC || "/workspace/work/gui-gate";
-const BIN = process.env.GUI_GATE_BIN || join(GG, "target/release/gui-gate");
+const BIN = process.env.GUI_GATE_BIN || join(GG, "target/release/gui-gate" + (process.platform === "win32" ? ".exe" : ""));
+const PY = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
 const skip = !existsSync(BIN) ? "gui-gate binary not built" : false;
 
 function start(answers: any, extra: string[] = []) {
@@ -17,7 +18,7 @@ function start(answers: any, extra: string[] = []) {
   writeFileSync(f, JSON.stringify(answers));
   const h = scripted(f);
   const c = new McpClient(h.fn);
-  c.start(BIN, ["--child", `python3 ${join(GG, "tests/fake_driver.py")}`, "--log", "none", "--human", "elicit", ...extra], {
+  c.start(BIN, ["--child", `${PY} ${join(GG, "tests", "fake_driver.py")}`, "--log", "none", "--human", "elicit", ...extra], {
     ...process.env, PYTHONPATH: GG, GUI_GATE_NO_UPDATE_CHECK: "1",
     GUI_GATE_REVIEWER_URL: "http://127.0.0.1:9/v1/chat/completions", GUI_GATE_REVIEWER_MODEL: "fake", GUI_GATE_REVIEWER_KEY: "k",
     GUI_GATE_REVIEWER_TIMEOUT: "2", GUI_GATE_REVIEWER_ENV: join(dir, "none.env"),
