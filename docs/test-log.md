@@ -175,3 +175,106 @@
 - R4（观察）：设置页密钥占位显示末 4 位（`set (...XXXX)`）。
 - O3 仍在：模型常用 run_command 读夹具源码。O4：AppImage 运行中模型多点了一次 Increment（模型行为，已如实报告）。
 - 本轮模型花费（第 2 轮 15 个切片）：154 次 usage，input 264k、output 28.9k、cache_read 1.55M tokens。
+
+## 2026-10-26 Windows x86_64 与 macOS universal：CI 构建与冒烟（未上真机）
+
+- desktop main **7ba3501**（合并 win-dev；版本号仍 0.3.0）；gui-gate main **dafb126**（0cae275 + Windows 修复 + 测试不弹真实对话框），随后 **025f9ba**（macOS 终端规则用 ps/lsof；驱动崩溃后的调用不再等满超时）。三个工作流的 `GATE_REF` 一致。之后 mac-dev 4543ad0 / 4ef06c8 把 `GATE_REF` 改为 gui-gate main **6339cf8**（W1 Windows 路径修复），并合回 desktop main。gate 未打 tag、未发 release。
+- CI 不用任何真模型、不碰测试机；冒烟在 GitHub runner 的桌面上跑（Windows Server 2025 / macOS runner），**不等于真机**。
+- 验证方式：**CI实测** = GitHub runner 上真实安装、启动、截图；**脚本(fake_driver)** = gui-gate 的 fake_driver 测试套件（含包内二进制）；**单元** = cargo / node 单元测试；**未测** = 没有验证。
+- 截图：`/workspace/work/gp5/win/main/{normal,testhooks}/`（main 7ba3501 的运行），`/workspace/work/gp5/win/{normal,testhooks}/`（win-dev dc681dc 的运行，修设置页之前）；收尾复验（4ef06c8）在 `/workspace/work/gp5/final/`。
+
+### Windows（windows-latest，Windows Server 2025 Datacenter 24H2 build 26100）
+
+运行：main 7ba3501 → [run 40231125970](https://github.com/cszf1/gui-pi-desktop/actions/runs/40231125970) 全绿（test、bundle normal、bundle testhooks）；Linux 工作流同一提交 [run 40231125977](https://github.com/cszf1/gui-pi-desktop/actions/runs/40231125977) 绿（新 GATE_REF 下 Linux 仍通过）。
+
+| 项 | 结果 | 验证方式 | 证据 | 日期 |
+|---|---|---|---|---|
+| gui-gate 构建（静态 CRT）+ `cargo test --release` | 过（120 测试中 save_button_over_existing_export 在 5bdb152 前失败：Windows 文件夹路径含反斜杠；5bdb152 修） | 单元 | run 40231125970 test 作业 | 2026-10-26 |
+| gate fake_driver e2e + 安全 + meta（58 个） | 过（OK，skipped=6：run_command / 假终端是 bash-only） | 脚本(fake_driver) | 同上 | 2026-10-26 |
+| 第 4/5 次 CI“e2e 卡住 >10 分钟”的原因 | 已修 | 脚本(fake_driver) | 不是死锁：没有 elicitation 的用例在 Windows 上退到 gate 自己的 PowerShell 对话框，每个等满 120 s（第 5 次日志：`test_no_elicitation_capability_never_executes` 123 s、`test_why_a_request_ended_is_recorded` 120 s）；另有 5 个 bash-only 用例失败。修：gate 测试默认 `GUI_GATE_DIALOG=none`、工作流同设；bash-only 用例在 Windows 跳过（dafb126） | 2026-10-26 |
+| gate 全量 python（311 个） | 修前：**信息性**，29 失败 / 5 错误 / 14 跳过（win-dev dc681dc run 40228893928）。修后（W1，gate 6339cf8）：**必须通过**，OK，skipped=39 | 脚本(fake_driver) | 修前失败三类：① run_command / 终端行规则 / jobs（bash-only）；② bench 工具（Linux 专用 shell 脚本）；③ 真实的 Windows 路径问题。③已修（见下“W1”），①②在测试里按原因跳过；gate ci.yml run 40236851630 windows-latest | 2026-10-26 |
+| 扩展测试（58 个，含对真实 gui-gate.exe 的 E2E-ext） | 过（第一次失败 1 个：测试用 `split("/")` 取 skill 目录名，改 `path.basename`，c3a0f88） | 单元 + 脚本(fake_driver) | run 40231125970 | 2026-10-26 |
+| gpd-core 测试（Job Object 停止、环境白名单不区分大小写、自检） | 过（49 个） | 单元 | 同上 | 2026-10-26 |
+| 资源布置（node win-x64、Pi 锁、gui-gate.exe、Cua Driver 0.38.0 windows-x86_64；SHA256 + Sigstore） | 过 | CI实测 | bundle 作业 | 2026-10-26 |
+| NSIS + MSI 打包 | 过（setup.exe 57.7 MB，msi 95.3 MB） | CI实测 | 预发布资产 | 2026-10-26 |
+| 静默安装 `/S` → `%LOCALAPPDATA%\gui-pi-desktop\gui-pi-desktop.exe`，组件齐全（node.exe、gui-gate.exe、cua-driver.exe、SHA256SUMS） | 过 | CI实测 | `install.txt` | 2026-10-26 |
+| 自检 | windows ok、webview2 ok（155.0.4283.62）、uia ok（6 个顶层窗口）、keychain ok（凭据管理器）；session warn（runner 没有 SESSIONNAME）、elevation warn（runner 以管理员运行）——两条 warn 是 runner 环境，符合预期 | CI实测 | `app.stderr.txt` | 2026-10-26 |
+| 组件校验 | 过：`All 15072 bundled files match the release's SHA256SUMS` | CI实测 | 同上 | 2026-10-26 |
+| 无模型配置时 `--run` 拒绝开始 | 过（exit 3） | CI实测 | 冒烟日志 | 2026-10-26 |
+| 主窗口截图 | 过：无截断、无乱码 | CI实测 | `main/normal/01-main-window.png` | 2026-10-26 |
+| 设置页在启动检查完成后刷新 | **修后过**：dc681dc 上设置页一直停在“Start is blocked: Still checking…”（设置页没监听 `checks_done`，主窗口有）；799226d 修，main 截图显示全部检查项 | CI实测 | `win/testhooks/01-main-and-settings.png`（修前）、`win/main/testhooks/01-main-and-settings.png`（修后） | 2026-10-26 |
+| 四种弹窗（测试钩子版 `--demo-popups`，经真实问人 IPC） | 过：approve 480×227、clarify 480×298、takeover 480×282、help 480×290，全部 `fit ... ok true`；文字完整、倒计时行完整、无乱码 | CI实测 | `main/testhooks/02..05-popup-*.png` | 2026-10-26 |
+| 弹窗回复检查 | 过：approve `accept/allow`、clarify `accept/"Shuffle labels"`、takeover `accept/done:true`、help 超时 `decline/timed_out`（不回答 = 未执行） | CI实测 | `main/testhooks/app.stdout.txt` | 2026-10-26 |
+| 包内 gui-gate.exe 跑 fake_driver e2e | 过：30 个 OK（skipped=1） | 脚本(fake_driver) | `main/normal/bundled-gate-e2e.txt` | 2026-10-26 |
+| 静默卸载 | 过：卸载器 exit 0，exe 已删除 | CI实测 | 冒烟日志 | 2026-10-26 |
+| 真实任务（真模型）、UIA 读真实应用、UAC / 管理员窗口接管、DPI 多屏、RDP 断开、SmartScreen 提示 | 未测 | 未测 | 需要 Windows 真机 | — |
+
+#### 收尾复验：mac-dev 4ef06c8（gate 6339cf8，popup.js 二次适配后）
+
+运行：[windows 40238010924](https://github.com/cszf1/gui-pi-desktop/actions/runs/40238010924) 全绿（test、bundle normal、bundle testhooks）。截图与日志：`/workspace/work/gp5/final/windows/{normal,testhooks}/`。
+
+| 项 | 结果 | 验证方式 | 证据 | 日期 |
+|---|---|---|---|---|
+| gui-gate cargo test / fake_driver e2e+安全+meta / 全量 python（**必须通过**） | 过：125 passed（7 ignored）/ 58 OK（skipped=6）/ 311 OK（skipped=39） | 单元 + 脚本(fake_driver) | run 40238010924 test 作业 | 2026-10-26 |
+| 扩展测试 / gpd-core | 过：58/58、50 个 | 单元 + 脚本(fake_driver) | 同上 | 2026-10-26 |
+| 安装、自检、组件校验（15072 个文件）、无模型 `--run` exit 3、包内 gate e2e（30 OK，skipped=1）、卸载 | 过 | CI实测 / 脚本(fake_driver) | `final/windows/normal/` | 2026-10-26 |
+| 四种弹窗（popup.js 改为“适配后再量一次，短了就补”之后） | 过，无截断：approve 480×227、clarify 480×298、takeover 480×282、help 480×290，每个 `content = seen`，未触发补高；倒计时行完整 | CI实测 | `final/windows/testhooks/02..05-popup-*.png`、`app.stderr.txt` | 2026-10-26 |
+| 弹窗回复 | 过：approve allow、clarify “Shuffle labels”、takeover done、help `decline/timed_out` | CI实测 | `final/windows/testhooks/app.stdout.txt` | 2026-10-26 |
+
+### macOS（universal：Apple silicon + Intel；CI 冒烟，未上真机）
+
+- 运行：mac-dev 4543ad0 → [run 40236133944](https://github.com/cszf1/gui-pi-desktop/actions/runs/40236133944) 绿；4ef06c8（gate 6339cf8）→ [run 40238011202](https://github.com/cszf1/gui-pi-desktop/actions/runs/40238011202) 全绿（test、bundle normal、bundle testhooks、intel）。runner：macos-latest = macOS 26.6.2 arm64（镜像 macos-26-arm64）；intel = macos-15-intel（macOS 15.7.9 x86_64）。
+- 截图与日志：`/workspace/work/gp5/final/macos/{normal,testhooks,intel}/`（4ef06c8）；`/workspace/work/gp5/mac/`（4543ad0 之前的运行）。
+
+| 项 | 结果 | 验证方式 | 证据 | 日期 |
+|---|---|---|---|---|
+| gui-gate universal 构建（arm64 + x86_64 用 lipo 合并）+ cargo test | 过：132 passed（7 ignored） | 单元 | run 40238011202 test 作业 | 2026-10-26 |
+| gate fake_driver e2e + 安全 + meta | 过：58 OK | 脚本(fake_driver) | 同上 | 2026-10-26 |
+| gate 全量 python（**必须通过**，不再 continue-on-error） | 过：311 OK（skipped=10：bash-only / Linux bench） | 脚本(fake_driver) | 同上；gate ci.yml run 40236851630 macos-latest 同样 OK（skipped=10） | 2026-10-26 |
+| 扩展测试（含对真实 gui-gate 的 E2E-ext）/ gpd-core | 过：58/58、60 个 | 单元 + 脚本(fake_driver) | 同上 | 2026-10-26 |
+| .app / .dmg 打包，四个可执行文件都是 universal（gui-pi-desktop、node、gui-gate、cua-driver：x86_64 arm64） | 过 | CI实测 | `final/macos/normal/summary.txt` | 2026-10-26 |
+| .dmg 对 SHA256SUMS（arm64 与 Intel 两处都查） | 过 | CI实测 | 同上、`final/macos/intel/summary.txt` | 2026-10-26 |
+| 包内 CuaDriver.app 保持 Cua 的 Developer ID 签名（`codesign --deep --strict` 有效；Authority=Developer ID Application: Cua AI, Inc. (YCK386LBJ7)，非 ad-hoc），与暂存的那份逐字节相同（含符号链接，tree-same.py） | 过 | CI实测 | `codesign-cuadriver*.txt` | 2026-10-26 |
+| gui-pi-desktop.app 本身不签名（设计如此：arm64 上只有链接器 ad-hoc，Intel 上“not signed at all”）；Gatekeeper `spctl` 拒绝 | 符合预期 | CI实测 | `gatekeeper.txt`；用户首次打开需按 design §6.8.2 的步骤放行 | 2026-10-26 |
+| 自检 | macos ok、keychain ok（macOS 钥匙串）；accessibility / screen warn（CuaDriver 助手未运行，状态未知——runner 上无法授予 TCC 权限，符合预期）；`All 15060 bundled files match`。cua-driver 0.38.0 的 permissions JSON 按真实结构解析（前面的遥测提示文字被跳过） | CI实测 | `app.stderr.txt`、`cua-permissions.json` | 2026-10-26 |
+| 无模型配置时 `--run` 拒绝开始（arm64 与 Intel） | 过（exit 3） | CI实测 | `summary.txt` | 2026-10-26 |
+| 包内 gui-gate 跑 fake_driver e2e（arm64 与 Intel） | 过：30 OK | 脚本(fake_driver) | `bundled-gate-e2e.txt` | 2026-10-26 |
+| 主窗口 / 设置页截图 | 过：无截断、无乱码；设置页显示全部检查项与 Grant permissions / 打开辅助功能 / 打开录屏设置按钮 | CI实测 | `final/macos/normal/01-main-window.png`、`final/macos/testhooks/01-main-and-settings.png`、`final/macos/intel/01-main-window.png` | 2026-10-26 |
+| 四种弹窗高度 | **修后过**：4543ad0 之前 macOS 少了一个标题栏高度（倒计时行被截、出现滚动条）；popup.js 改为适配后再量 `innerHeight`，短了就补一次，CI 检查每个弹窗页面高度：approve 232/232、clarify 284/284、takeover 266/266、help 275/275（content/page） | CI实测 | `final/macos/testhooks/02..05-popup-*.png`、`summary.txt` | 2026-10-26 |
+| 弹窗回复 | 过：approve allow、clarify “Shuffle labels”、takeover done、help `decline/timed_out` | CI实测 | `final/macos/testhooks/summary.txt` | 2026-10-26 |
+| 真实任务（真模型）、TCC 实际授权弹窗与授权后操作、Retina 坐标换算、首次打开 Gatekeeper 放行流程、Apple 公证 | 未测 | 未测 | 需要 Mac 真机 | — |
+
+### Linux：popup.js 改动后的弹窗复验
+
+- 4ef06c8 的 [linux run 40238012504](https://github.com/cszf1/gui-pi-desktop/actions/runs/40238012504)（normal）与 [run 40239033741](https://github.com/cszf1/gui-pi-desktop/actions/runs/40239033741)（test_hooks）全绿（含 gate 6339cf8 测试）。
+- 弹窗截图：linux.yml 不截图，所以用一个**临时**工作流（分支 tmp-linux-popup-shot，[run 40239875939](https://github.com/cszf1/gui-pi-desktop/actions/runs/40239875939)，跑完即删分支，未合并）在 ubuntu-22.04 + Xvfb 1024×768 + openbox 上运行预发布 `build-4ef06c8-testhooks` 的 AppImage（`sha256sum -c` OK）`--demo-popups 15 --show-settings`。工作流副本：`/workspace/work/gp5/final/linux/linux-popup-shot.yml`。
+
+| 项 | 结果 | 验证方式 | 证据 | 日期 |
+|---|---|---|---|---|
+| 四种弹窗 | 过，无截断：approve 480×228、clarify 480×282、takeover 480×262、help 480×272，每个 `content = seen`，未触发补高；倒计时行完整 | CI实测 | `final/linux/testhooks/02..05-popup-*.png`、`app.stderr.txt` | 2026-10-26 |
+| 弹窗回复 | 过：approve allow、clarify “Shuffle labels”、takeover done、help `decline/timed_out` | CI实测 | `final/linux/testhooks/summary.txt` | 2026-10-26 |
+| 设置页 | 显示正确：该 runner 没有 AT-SPI 总线和 Secret Service，所以 atspi ✗、keychain !、“Start is blocked”——这是 runner 环境，提示内容符合设计；`All 15059 bundled files match` | CI实测 | `final/linux/testhooks/01-main-and-settings.png` | 2026-10-26 |
+
+### W1：gui-gate Windows 路径修复（gate 0c7f98c → c20cc68 → 6339cf8，main 已快进到 6339cf8，未打 tag）
+
+gate ci.yml [run 40236851630](https://github.com/cszf1/gui-gate/actions/runs/40236851630)：ubuntu-latest cargo 136 passed / python 311 OK（skipped=1）；macos-latest 132 / 311 OK（skipped=10）；windows-latest 125 / 311 OK（skipped=39）。三平台都是“必须通过”。
+
+| 项 | 修复 | 结果 | 验证方式 | 证据 | 日期 |
+|---|---|---|---|---|---|
+| `C:\...`、混合分隔符、UNC 被当成相对路径（run_command cwd 拼在 home 后；inspect env / 计划检查 / check_done 说“不存在”） | 0c7f98c：读作绝对路径并规范化 | 过 | 单元 + 脚本(fake_driver) | windows-latest 全量 python OK | 2026-10-26 |
+| 8.3 短名（`RUNNER~1`）与长名不相等 | 0c7f98c：canon / home 解析成长名 | 过 | 单元 + 脚本(fake_driver) | 同上 | 2026-10-26 |
+| check_done 看不到 Windows 上的改名 | 0c7f98c：NTFS ChangeTime 计入 | 过 | 脚本(fake_driver) | 同上 | 2026-10-26 |
+| 无盘符的根路径（`/tmp/w/a`）在文件夹不存在时被补上盘符，前后不可比 | c20cc68：保持原写法；6339cf8：不把无盘符根路径解析到某个盘 | 过 | 单元 + 脚本(fake_driver) | 同上 | 2026-10-26 |
+| 任务文本里的 `C:\...` / UNC 路径（check_done、inspect env、VERIFY_PLUS 回读、授权词） | 6339cf8 | 过 | 脚本(fake_driver) | 同上 | 2026-10-26 |
+| run_command 在 Windows 上 | 0c7f98c 曾改为“一开始就拒绝”，6339cf8 撤回：仍走 gate 路径（裁决与人员冻结照常生效），执行时说明不可用 | 过 | 脚本(fake_driver) | 同上 | 2026-10-26 |
+| macOS 侧顺带：反事实测试用稳定 crc32 重播种（`hash()` 每进程加盐，macOS 上不稳定）；清理测试读 gate 解析后的路径（/private/var） | c20cc68 | 过 | 脚本(fake_driver) | macos-latest OK | 2026-10-26 |
+| bash-only（run_command、终端行规则、jobs）与 Linux bench 测试在 Windows/macOS 上按原因跳过 | 0c7f98c | 跳过（按设计） | — | skipped=39 / 10 | 2026-10-26 |
+| 真实 Windows 机器上的路径行为（真实用户目录、OneDrive 重定向、网络盘） | — | 未测 | 未测 | 需要真机 | — |
+
+### 本节剩余问题
+
+- 三个平台都只在 GitHub runner 上冒烟，**没有真机、没有真模型**；Windows 的 UIA 读真实应用 / UAC / DPI 多屏 / RDP、macOS 的 TCC 授权 / Retina / Gatekeeper 放行均未测。
+- macOS .app 未签名、未公证（设计如此），Gatekeeper 会拒绝，首次打开需手动放行。
+- Windows IPC 仍是 `127.0.0.1` + token（命名管道未做，M5）。
+- Linux CI 不截图；本次 Linux 弹窗截图来自一次性的临时工作流，没有进入 linux.yml。
+- R1（gate `jobs::tests::no_orphans_no_logs` 偶发）已在 gate 5aece68 修（每个 job 日志名唯一），本轮三平台未再出现。
