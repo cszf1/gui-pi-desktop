@@ -147,6 +147,9 @@ export class McpClient {
   /** tools/call with MRTR person rounds. */
   async callTool(name: string, rawArgs: any, signal?: AbortSignal): Promise<ToolResult> {
     const args = cleanArgs(rawArgs);
+    if (this.closed || !this.child)
+      return { content: [{ type: "text", text: "[gui-pi] gui-gate is not running; nothing was executed. The task cannot continue." }],
+               isError: true, structuredContent: { status: "blocked", gate_lost: true } };
     let params: Record<string, any> = { name, arguments: args };
     for (let round = 0; round <= MAX_ROUNDS; round++) {
       let m: any;
