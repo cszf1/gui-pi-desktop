@@ -8,7 +8,7 @@ on:
     inputs:
       test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
 env:
-  GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # gui-gate main dafb126: 0cae275 + Windows fixes (job log names, child env case, Windows paths in dialog values) + tests never open a real dialog; not tagged
+  GATE_REF: 025f9baa8fb207687039043cbc07f7dad3203b63  # gui-gate main 025f9ba: 0cae275 + Windows fixes (job log names, child env case, Windows paths in dialog values), tests never open a real dialog, macOS terminal rules (ps/lsof), no hang after a driver crash; not tagged
 permissions: {contents: write}
 jobs:
   build:
