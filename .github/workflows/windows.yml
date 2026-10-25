@@ -9,7 +9,7 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  GATE_REF: e67b9aee21c0552781964155b65a7ff8e6cd3d63  # set to the gui-gate main commit the app ships (see linux.yml)
+  GATE_REF: 5bdb1526a309fd40311636e7a25a87a9ee52a834  # set to the gui-gate main commit the app ships (see linux.yml)
   PYTHON: python
 permissions: {contents: write}
 jobs:
@@ -40,12 +40,15 @@ jobs:
         name: gui-gate fake_driver end-to-end (every gate return action, MRTR person requests) + security / meta suites
         working-directory: gate
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
-        run: python -m unittest tests.test_actions_e2e tests.test_security_e2e tests.test_mcp_meta -v 2>&1 | tail -80; exit ${PIPESTATUS[0]}
-      - name: gui-gate full python suite (informational on Windows - see docs/test-log.md for which tests are bash-only)
+        timeout-minutes: 40
+        run: python -u -m unittest tests.test_actions_e2e tests.test_security_e2e tests.test_mcp_meta -v
+      - if: ${{ !cancelled() }}
+        name: gui-gate full python suite (informational on Windows - see docs/test-log.md for which tests are bash-only)
         working-directory: gate
         continue-on-error: true
+        timeout-minutes: 60
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
-        run: python -m unittest discover -s tests 2>&1 | grep -E "^(FAIL|ERROR):|^Ran|^OK|^FAILED" ; exit ${PIPESTATUS[0]}
+        run: python -u -m unittest discover -s tests
       - if: ${{ !cancelled() }}
         name: extension tests (incl. E2E-ext against the real gui-gate.exe + fake driver)
         working-directory: packages/gui-pi
