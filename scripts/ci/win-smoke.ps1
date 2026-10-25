@@ -67,7 +67,8 @@ if ($Variant -eq "testhooks") {
     $parts = $want[$k].Split("|")
     $flat = ($r.reply | ConvertTo-Json -Compress -Depth 5)
     Write-Host "reply ${k}: $flat"
-    if ($r.reply.action -ne $parts[0] -or -not $flat.Contains($parts[1].ToLower()) -and -not $flat.Contains($parts[1])) { $fails += "reply for ${k}: $flat" }
+    $hasWord = $flat.ToLower().Contains($parts[1].ToLower())
+    if (($r.reply.action -ne $parts[0]) -or (-not $hasWord)) { $fails += "reply for ${k}: $flat" }
   }
   Remove-Item Env:GUI_PI_HUMAN_AUTO
 } else {
@@ -87,8 +88,9 @@ Write-Host "--- stdout"; Get-Content $so | Select-Object -First 40 | ForEach-Obj
 $err = Get-Content $se -Raw
 if ($err -notmatch "bundled files match the release's SHA256SUMS") { $fails += "bundle integrity not confirmed" }
 foreach ($id in @("windows", "webview2", "uia", "keychain")) {
-  $line = (Get-Content $se | Where-Object { $_ -like "[self-check] ${id}:*" } | Select-Object -First 1)
-  if (-not $line) { $fails += "self-check $id missing" } elseif ($line -like "*: fail -*") { $fails += "self-check failed: $line" }
+  $line = (Get-Content $se | Where-Object { $_.StartsWith("[self-check] ${id}:") } | Select-Object -First 1)
+  Write-Host "self-check line: $line"
+  if (-not $line) { $fails += "self-check $id missing" } elseif ($line.Contains(": fail -")) { $fails += "self-check failed: $line" }
 }
 
 # --- the bundled gate against gui-gate's fake driver (every gate return action) ---

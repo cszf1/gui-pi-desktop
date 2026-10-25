@@ -9,7 +9,7 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  GATE_REF: 5aece68d6571442684660371fae7f201331816e2  # set to the gui-gate main commit the app ships (see linux.yml)
+  GATE_REF: e67b9aee21c0552781964155b65a7ff8e6cd3d63  # set to the gui-gate main commit the app ships (see linux.yml)
   PYTHON: python
 permissions: {contents: write}
 jobs:
@@ -26,13 +26,18 @@ jobs:
         with: {python-version: "3.12"}
       - uses: Swatinem/rust-cache@v2
         with: {workspaces: "gate -> target\ndesktop -> target", key: windows}
-      - name: gui-gate build (static CRT, like gui-gate's own Windows release) + cargo tests
+      - name: gui-gate build (static CRT, like gui-gate's own Windows release)
         working-directory: gate
         env: {RUSTFLAGS: "-C target-feature=+crt-static"}
-        run: |
-          cargo build --release
-          cargo test --release
-      - name: gui-gate fake_driver end-to-end (every gate return action, MRTR person requests) + security / meta suites
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with: {name: gate-windows, path: gate/target/release/gui-gate.exe}
+      - name: gui-gate cargo tests
+        working-directory: gate
+        env: {RUSTFLAGS: "-C target-feature=+crt-static"}
+        run: cargo test --release
+      - if: ${{ !cancelled() }}
+        name: gui-gate fake_driver end-to-end (every gate return action, MRTR person requests) + security / meta suites
         working-directory: gate
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
         run: python -m unittest tests.test_actions_e2e tests.test_security_e2e tests.test_mcp_meta -v 2>&1 | tail -80; exit ${PIPESTATUS[0]}
@@ -41,19 +46,20 @@ jobs:
         continue-on-error: true
         env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
         run: python -m unittest discover -s tests 2>&1 | grep -E "^(FAIL|ERROR):|^Ran|^OK|^FAILED" ; exit ${PIPESTATUS[0]}
-      - name: extension tests (incl. E2E-ext against the real gui-gate.exe + fake driver)
+      - if: ${{ !cancelled() }}
+        name: extension tests (incl. E2E-ext against the real gui-gate.exe + fake driver)
         working-directory: packages/gui-pi
         env: {GUI_GATE_BIN: "${{ github.workspace }}/gate/target/release/gui-gate.exe", GUI_GATE_SRC: "${{ github.workspace }}/gate"}
         run: node --test test/*.test.ts
-      - name: shell core tests (Job Object Stop, env allowlist without case, self-check)
+      - if: ${{ !cancelled() }}
+        name: shell core tests (Job Object Stop, env allowlist without case, self-check)
         working-directory: desktop
         env: {GPD_DUMP_MODELS_JSON: "${{ runner.temp }}/models.json"}
         run: cargo test -p gpd-core
-      - uses: actions/upload-artifact@v4
-        with: {name: gate-windows, path: gate/target/release/gui-gate.exe}
 
   bundle:
     needs: test
+    if: ${{ !cancelled() }}  # DEV: bundle even when a test step failed (reverted before merging)
     runs-on: windows-latest
     strategy:
       fail-fast: false
