@@ -6,13 +6,15 @@
 // newest FULL tree of each window (its anchor) verbatim while later diffs build on it. Rules:
 //   1. per window: the newest full tree is the anchor; it and every diff after it stay as they are;
 //   2. every observation of that window before its anchor becomes a one-line summary (no screenshot);
-//   3. only the newest screenshot in the whole context is kept (older images become a one-line note);
+//   3. per window only its newest screenshot is kept, at most MAX_IMAGES windows (the most recent ones); older
+//      images become a one-line note. Images whose window is unknown count as one window "?";
 //   4. text before the observation marker (what the action did, gate notes) is kept, capped.
 // Observations whose window is unknown fall back to "newest one stays full" (bench/pi_ext/obs_prune.ts).
 
 export const MARKERS = ["[gate] Window right after the action", "[gate] Window now (nothing was executed)"];
 const DIFF_RX = /Only rows that changed since snapshot|Nothing in the tree changed since snapshot/;
 const HEAD_KEEP = 600;
+export const MAX_IMAGES = 3;
 
 export type Msg = { role: string; toolName?: string; content?: any[]; details?: any; [k: string]: any };
 
@@ -88,14 +90,15 @@ export function prune(messages: Msg[]): Msg[] {
     const a = anchor.get(w);
     if (a !== undefined && i < a) old.add(i);
   });
-  // newest image anywhere
-  let newestImg = -1;
+  // newest image per window, newest MAX_IMAGES windows only
+  const imgByWin = new Map<string, number>();
   messages.forEach((m, i) => {
-    if (!old.has(i) && hasImage(m)) newestImg = i;
+    if (!old.has(i) && hasImage(m)) imgByWin.set(windowKey(m), i);
   });
+  const keepImg = new Set([...imgByWin.values()].sort((a, b) => b - a).slice(0, MAX_IMAGES));
   return messages.map((m, i) => {
     const isOld = old.has(i);
-    const dropImg = hasImage(m) && i !== newestImg;
+    const dropImg = hasImage(m) && !keepImg.has(i);
     if (!isOld && !dropImg) return m;
     const content: any[] = [];
     let dropped = 0;
@@ -109,7 +112,7 @@ export function prune(messages: Msg[]): Msg[] {
       if (isOld && c && c.type === "text") content.push({ ...c, text: pruneText(c.text || "", m.toolName) });
       else content.push(c);
     }
-    if (dropped && !isOld) content.push({ type: "text", text: "[client: an older screenshot was removed; the newest one is current]" });
+    if (dropped && !isOld) content.push({ type: "text", text: "[client: an older screenshot was removed; the newest one of this window is current]" });
     return { ...m, content };
   });
 }

@@ -40,12 +40,19 @@ test("a new full read becomes the anchor; windows are independent", () => {
   assert.equal(out[3], msgs[3]);
 });
 
-test("only the newest screenshot survives", () => {
-  const msgs: any[] = [read("s1", 3, true, 1), read("s2", 3, true, 2)];
+const img = (m: any) => ({ ...m, content: [...m.content, { type: "image", data: "AAAA", mimeType: "image/jpeg" }] });
+const imgs = (out: any[]) => out.map((m) => m.content.some((c: any) => c.type === "image"));
+
+test("each window keeps its newest screenshot", () => {
+  const msgs: any[] = [read("s1", 3, true, 1), img(act("s2", true, 1)), read("t1", 3, true, 2)];
   const out = prune(msgs);
-  assert.ok(!out[0].content.some((c: any) => c.type === "image"));
-  assert.ok(out[0].content.some((c: any) => /older screenshot was removed/.test(c.text || "")));
-  assert.ok(out[1].content.some((c: any) => c.type === "image"));
+  assert.deepEqual(imgs(out), [false, true, true]);
+  assert.ok(out[0].content.some((c: any) => /screenshot was removed|summarised/.test(c.text || "")));
+});
+
+test("at most three windows keep a screenshot, the most recent ones", () => {
+  const msgs: any[] = [read("a", 2, true, 1), read("b", 2, true, 2), read("c", 2, true, 3), read("d", 2, true, 4)];
+  assert.deepEqual(imgs(prune(msgs)), [false, true, true, true]);
 });
 
 test("plan line goes on the newest tool result unless the gate printed one", () => {

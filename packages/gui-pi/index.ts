@@ -16,6 +16,7 @@
 import { McpClient } from "./src/mcp.ts";
 import { prune, withPlanLine, obsKind, textOf } from "./src/context.ts";
 import { makeAskHuman } from "./src/human.ts";
+import { PersonFreeze } from "./src/freeze.ts";
 import { PlanTracker } from "./src/plan.ts";
 
 const VERSION = "0.1.0";
@@ -46,7 +47,8 @@ export default async function (pi: any) {
   let ui: any = null;
   const env = process.env;
   const human = makeAskHuman(env, () => ui);
-  const mcp = new McpClient(human.ask, VERSION);
+  const freeze = new PersonFreeze();
+  const mcp = new McpClient(freeze.wrap(human.ask), VERSION);
   const plan = new PlanTracker();
   const snapWin = new Map<string, string>(); // snapshot id -> "pid:window_id"
   const refusals: string[] = [];
@@ -56,6 +58,13 @@ export default async function (pi: any) {
   mcp.start(env.GUI_PI_GATE || "gui-gate", gateArgs(env), { ...env, GUI_GATE_NO_UPDATE_CHECK: "1" });
   await mcp.discover();
   const tools = await mcp.listTools();
+
+  const gateTools = new Set<string>(tools.map((t: any) => String(t.name)));
+  pi.on("turn_start", async () => freeze.newTurn());
+  pi.on("tool_call", async (event: any) => {
+    const why = freeze.check(String(event?.toolName || ""), gateTools);
+    if (why) return { block: true, reason: why };
+  });
 
   for (const t of tools) {
     const name = String(t.name);
