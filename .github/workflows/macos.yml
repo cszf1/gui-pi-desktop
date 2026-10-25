@@ -91,13 +91,15 @@ jobs:
         run: |
           feat=""; if [ "${{ matrix.variant }}" = "testhooks" ]; then feat="--features test-hooks"; fi
           npx -y @tauri-apps/cli@2 build --target universal-apple-darwin $feat
+      - name: the nested CuaDriver.app is byte for byte the staged one (symlinks kept, nothing re-signed)
+        run: python3 scripts/ci/tree-same.py dist/resources/CuaDriver.app desktop/target/universal-apple-darwin/release/bundle/macos/gui-pi-desktop.app/Contents/Resources/resources/CuaDriver.app
       - name: checksums (resources.SHA256SUMS = what the app checks at start; SHA256SUMS = the packages)
         run: |
           cp dist/resources/SHA256SUMS resources.SHA256SUMS
           ( cd desktop/target/universal-apple-darwin/release/bundle/dmg && shasum -a 256 *.dmg ) > SHA256SUMS
           cat SHA256SUMS
       - name: install from the .dmg + run on the runner (signatures, self-check, integrity, screenshots; popups in the test-hooks build)
-        run: bash scripts/ci/mac-smoke.sh "$(ls desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)" "$GITHUB_WORKSPACE/smoke" "${{ matrix.variant }}" "$GITHUB_WORKSPACE/gate"
+        run: bash scripts/ci/mac-smoke.sh "$(ls desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg | head -1)" "$GITHUB_WORKSPACE/smoke" "${{ matrix.variant }}" "$GITHUB_WORKSPACE/gate" "$GITHUB_WORKSPACE/SHA256SUMS"
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: "smoke-macos-${{ matrix.variant }}", path: smoke}
@@ -131,7 +133,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with: {name: gui-pi-desktop-macos-universal, path: pkg}
       - name: install + run the universal build on Intel
-        run: bash scripts/ci/mac-smoke.sh "$(ls pkg/desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg pkg/*.dmg 2>/dev/null | head -1)" "$GITHUB_WORKSPACE/smoke" normal "$GITHUB_WORKSPACE/gate"
+        run: bash scripts/ci/mac-smoke.sh "$(ls pkg/desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg pkg/*.dmg 2>/dev/null | head -1)" "$GITHUB_WORKSPACE/smoke" normal "$GITHUB_WORKSPACE/gate" "$GITHUB_WORKSPACE/pkg/SHA256SUMS"
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: smoke-macos-intel, path: smoke}

@@ -81,6 +81,22 @@ const tick = () => {
 };
 tick();
 
-// size the window to its content (the shell clamps it to the screen); again when fonts / layout settle
-const fit = () => invoke("popup_fit", { height: Math.ceil(document.querySelector(".pop").getBoundingClientRect().height) + 4 }).catch(() => {});
-fit(); window.addEventListener("load", fit); setTimeout(fit, 300);
+// size the window to its content (the shell clamps it to the screen); again when fonts / layout settle. Then check
+// what the page really got: on macOS the requested size came out a title bar short (the countdown line was cut
+// off and a scroll bar showed), so the shortfall is added and asked for once more. `seen` is logged by the shell.
+let extra = 0;
+const need = () => Math.ceil(document.querySelector(".pop").getBoundingClientRect().height) + 4;
+let queue = Promise.resolve();
+const fit = () => (queue = queue.then(fitOnce));  // one at a time: two overlapping fits would add the shortfall twice
+const fitOnce = async () => {
+  try {
+    await invoke("popup_fit", { height: need() + extra, need: need(), seen: window.innerHeight });
+    await new Promise((r) => setTimeout(r, 150));
+    const short = need() - window.innerHeight;
+    if (short > 1 && extra < 240) {
+      extra += short;
+      await invoke("popup_fit", { height: need() + extra, need: need(), seen: window.innerHeight });
+    }
+  } catch (_) { /* not in the shell */ }
+};
+fit(); window.addEventListener("load", fit); setTimeout(fit, 300); setTimeout(() => { queue = queue.then(() => invoke("popup_fit", { height: need() + extra, need: need(), seen: window.innerHeight }).catch(() => {})); }, 900);
