@@ -9,10 +9,16 @@ const add = (kind, text, image, extra) => {
   log.appendChild(d); log.scrollTop = log.scrollHeight;
   return d;
 };
-const running = (on, label) => { $("stop").disabled = !on; $("start").disabled = on; $("status").textContent = label || (on ? "running" : ""); };
+const running = (on, label) => {
+  $("stop").disabled = !on; $("start").disabled = on; $("status").textContent = label || (on ? "running" : "");
+  $("msgrow").style.display = on ? "flex" : "none";
+};
 async function refresh() {
   const s = await invoke("get_settings");
-  $("problems").textContent = s.problems.length ? "Before you start, open Settings:\n" + s.problems.join("\n") : "";
+  const probs = [...s.problems];
+  if (s.checks && s.checks.blocked) probs.push(s.checks.blocked);
+  $("problems").textContent = probs.length ? "Before you start, open Settings:\n" + probs.join("\n") : "";
+  if (s.checks && s.checks.update && !shownUpdate) { shownUpdate = true; add("muted", s.checks.update); }
   if ($("stop").disabled) $("start").disabled = s.problems.length > 0;
 }
 async function start(t) {
@@ -25,6 +31,15 @@ $("start").onclick = () => {
   log.textContent = ""; add("text", "Task: " + t); start(t);
 };
 $("stop").onclick = () => invoke("stop_task");
+let shownUpdate = false;
+// a later message from the person: the shell writes it to the task file (the gate's trusted channel), then to Pi
+const sendMsg = async () => {
+  const t = $("message").value.trim(); if (!t) return;
+  try { await invoke("send_message", { text: t }); add("text", "You: " + t); $("message").value = ""; }
+  catch (e) { add("error", String(e)); }
+};
+$("send").onclick = sendMsg;
+$("message").onkeydown = (e) => { if (e.key === "Enter") sendMsg(); };
 listen("agent", (e) => {
   const ev = e.payload;
   if (ev.kind === "done") { $("status").textContent = ev.text === "aborted" ? "aborted" : "done"; return; }

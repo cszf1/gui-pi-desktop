@@ -6,3 +6,6 @@ pub mod human;
 pub mod rpc;
 pub mod proc;
 pub mod probe;
+pub mod task;
+pub mod selfcheck;
+pub mod integrity;

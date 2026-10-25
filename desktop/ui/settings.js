@@ -75,10 +75,21 @@ function render() {
   }
   if (Object.values(s.roles).some((x) => x.mode !== "off")) document.getElementById("advanced").open = true;
   document.getElementById("timeout").value = s.human_timeout_s;
+  document.getElementById("updates").checked = s.update_check !== false;
+  renderChecks(state.checks || {});
   document.getElementById("problems").textContent = state.problems.join("\n");
 }
+function renderChecks(c) {
+  const box = document.getElementById("checks"); box.textContent = "";
+  for (const x of c.system || []) box.appendChild(el("div", { className: x.level, textContent: `${x.level === "ok" ? "✓" : x.level === "warn" ? "!" : "✗"} ${x.message}` }));
+  if (c.integrity) box.appendChild(el("div", { className: c.integrity.ok ? (c.integrity.unverified ? "warn" : "ok") : "fail", textContent: c.integrity.message }));
+  if (c.update) box.appendChild(el("div", { className: "warn", textContent: c.update }));
+  if (c.blocked) box.appendChild(el("div", { className: "fail", textContent: "Start is blocked: " + c.blocked }));
+}
+document.getElementById("recheck").onclick = async () => { renderChecks(await invoke("self_check")); };
 async function save() {
   state.settings.human_timeout_s = Number(document.getElementById("timeout").value) || 120;
+  state.settings.update_check = document.getElementById("updates").checked;
   try { state = await invoke("save_settings", { settings: state.settings }); document.getElementById("saved").textContent = "saved"; render(); }
   catch (e) { document.getElementById("saved").textContent = String(e); throw e; }
 }

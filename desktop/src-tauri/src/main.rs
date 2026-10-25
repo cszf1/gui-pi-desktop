@@ -10,9 +10,10 @@
 use gpd_core::config::{all_slots, slot_main, slot_reviewer, slot_role, EffRole, Settings, ROLES};
 use gpd_core::human::{self, Outcome, Pending, Popup, Request, Service};
 use gpd_core::keys::{preview, store_notice, KeyStore, MemoryStore, SERVICE};
-use gpd_core::launch::{self, Paths};
+use gpd_core::launch::{self, Paths, Redactor};
 use gpd_core::proc::{self, Agent, AgentEvent, ExitReason, OnEvent};
-use gpd_core::{probe, rpc};
+use gpd_core::task::{self, TaskFile, UserWords};
+use gpd_core::{integrity, probe, rpc, selfcheck};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Write;
@@ -62,7 +63,19 @@ struct AppState {
     pending: Arc<Pending>,
     service: Mutex<Option<Arc<Service>>>,
     ipc: Mutex<Option<(String, String)>>,
+    /// the trusted task channel of the running task (only the person's words are ever written to it)
+    task: Mutex<Option<TaskFile>>,
+    /// masks every key value in what the shell logs or shows
+    redactor: Mutex<Redactor>,
+    /// startup checks (Linux self-check, bundle integrity) and the update notice, for the settings page
+    checks: Mutex<Value>,
 }
+
+static TASK_SEQ: AtomicU64 = AtomicU64::new(1);
+static MSG_SEQ: AtomicU64 = AtomicU64::new(1);
+/// How long Stop waits for the extension's ack (actions blocked, gate_reset, gate killed) before killing anyway.
+const STOP_ACK_WAIT: Duration = Duration::from_millis(2000);
+const CHECKING: &str = "Still checking this computer and the bundled components; try again in a moment.";
 
 static POPUP_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -82,14 +95,23 @@ fn private_dir(p: &PathBuf) {
     }
 }
 
+/// The app's private runtime dir (sockets, task files): $XDG_RUNTIME_DIR/gui-pi-desktop, else <data>/run.
+fn runtime_dir(app: &AppHandle) -> PathBuf {
+    std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|_| data_dir(app).join("run")).join("gui-pi-desktop")
+}
+
+fn resources_dir(app: &AppHandle) -> PathBuf {
+    std::env::var("GUI_PI_RESOURCES").map(PathBuf::from)
+        .unwrap_or_else(|_| app.path().resource_dir().map(|r| r.join("resources")).unwrap_or_else(|_| PathBuf::from("resources")))
+}
+
 fn headless() -> bool {
     std::env::var("GUI_PI_HEADLESS").is_ok()
 }
 
 /// Bundled resources (node, pi, extension, prompts, skills, gate, driver). GUI_PI_RESOURCES overrides for dev.
 fn paths(app: &AppHandle) -> Paths {
-    let res = std::env::var("GUI_PI_RESOURCES").map(PathBuf::from)
-        .unwrap_or_else(|_| app.path().resource_dir().map(|r| r.join("resources")).unwrap_or_else(|_| PathBuf::from("resources")));
+    let res = resources_dir(app);
     let exe = |n: &str| if cfg!(windows) { format!("{n}.exe") } else { n.to_string() };
     let driver = res.join("cua-driver").join(exe("cua-driver"));
     Paths {
@@ -115,7 +137,9 @@ fn get_settings(state: tauri::State<AppState>) -> Value {
     let keys = state.keys.lock().unwrap().clone();
     let status: HashMap<String, String> = all_slots().iter().map(|k| (k.clone(), keys.get(k).map(|v| preview(&v)).unwrap_or_else(|| "not set".into()))).collect();
     let errs = s.validate(&|slot| keys.has(slot));
-    json!({"settings": s, "keys": status, "store": keys.kind(), "store_notice": store_notice(keys.kind()), "problems": errs, "roles": ROLES})
+    let checks = state.checks.lock().unwrap().clone();
+    json!({"settings": s, "keys": status, "store": keys.kind(), "store_notice": store_notice(keys.kind()), "problems": errs, "roles": ROLES,
+           "checks": checks})
 }
 
 #[tauri::command]
@@ -198,12 +222,14 @@ fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> Outcome {
     let label = format!("popup-{}-{}", POPUP_SEQ.fetch_add(1, Ordering::SeqCst),
                         req.id.chars().filter(|c| c.is_ascii_alphanumeric()).take(16).collect::<String>());
     let Some(rx) = pending.open(&label) else { return Outcome::Unavailable };
-    let payload = json!({"kind": req.kind, "message": req.message, "seconds": seconds, "meta": req.meta});
+    // one shared component for the four result types (approve / clarify / takeover / help)
+    let payload = json!({"kind": req.kind, "message": req.message, "seconds": seconds, "view": human::view(req)});
     let url = format!("popup.html#{}", urlencode(&payload.to_string()));
-    let takeover = req.kind == "takeover" || req.kind == "ask_help";
+    let ty = human::type_of(&req.kind);
+    let takeover = ty == "takeover" || ty == "help";
     let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
-        .title(match req.kind.as_str() { "approve" => "Approve this step?", "answer" => "A question for you", "takeover" => "Your turn", _ => "The agent is stuck" })
-        .inner_size(460.0, if takeover { 230.0 } else { 260.0 })
+        .title(match ty { "approve" => "Approve this step?", "clarify" => "A question for you", "takeover" => "Your turn", _ => "The agent is stuck" })
+        .inner_size(480.0, if takeover { 300.0 } else { 320.0 })
         .always_on_top(true).focused(true).resizable(false)
         .build();
     let win = match built {
@@ -219,7 +245,7 @@ fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> Outcome {
             if let Ok(Some(m)) = win.current_monitor() {
                 let sf = m.scale_factor();
                 let (pos, sz) = (m.position(), m.size());
-                let x = pos.x + sz.width as i32 - ((460.0 + 40.0) * sf) as i32;
+                let x = pos.x + sz.width as i32 - ((480.0 + 40.0) * sf) as i32;
                 let y = pos.y + (40.0 * sf) as i32;
                 let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
             }
@@ -285,10 +311,18 @@ fn start_human_service(app: &AppHandle) -> Result<(Arc<Service>, (String, String
     let a = app.clone();
     let popup: Popup = Arc::new(move |req, secs| show_popup(&a, req, secs));
     let svc = Service::new(token.clone(), popup);
+    // per-question and per-task person metrics (gui-pi-human/1) for bench/human_pilot.py; nothing more is shown
+    let logs = data_dir(app).join("logs");
+    private_dir(&logs);
+    let hl = Mutex::new(std::fs::OpenOptions::new().create(true).append(true).open(logs.join("human.jsonl")).ok());
+    svc.set_log(Box::new(move |v| {
+        if let Some(f) = hl.lock().unwrap().as_mut() {
+            let _ = writeln!(f, "{v}");
+        }
+    }));
     #[cfg(unix)]
     {
-        let base = std::env::var("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|_| data_dir(app).join("run"));
-        let path = base.join("gui-pi-desktop").join(format!("{}.sock", std::process::id()));
+        let path = runtime_dir(app).join(format!("{}.sock", std::process::id()));
         human::serve_unix(&path, svc.clone()).map_err(|e| e.to_string())?;
         Ok((svc, (path.display().to_string(), token)))
     }
@@ -301,10 +335,13 @@ fn start_human_service(app: &AppHandle) -> Result<(Arc<Service>, (String, String
 
 // ------------------------------------------------------------------ the agent
 fn emit_ui(app: &AppHandle, ev: &rpc::UiEvent) {
+    let red = app.state::<AppState>().redactor.lock().unwrap().clone();
+    let mut ev = ev.clone();
+    ev.text = red.line(&ev.text);
     if headless() {
-        println!("{}", serde_json::to_string(ev).unwrap_or_default());
+        println!("{}", serde_json::to_string(&ev).unwrap_or_default());
     }
-    let _ = app.emit("agent", ev);
+    let _ = app.emit("agent", &ev);
 }
 
 fn current_agent(app: &AppHandle) -> Option<Arc<Agent>> {
@@ -315,7 +352,8 @@ fn on_agent_event(app: &AppHandle, e: AgentEvent, log: &Mutex<Option<std::fs::Fi
     match e {
         AgentEvent::Line(line) => {
             if let Some(f) = log.lock().unwrap().as_mut() {
-                let _ = writeln!(f, "{line}");
+                let red = app.state::<AppState>().redactor.lock().unwrap().clone();
+                let _ = writeln!(f, "{}", red.line(&line));
             }
             let Some(ev) = rpc::ui_event(&line) else { return };
             if ev.kind == "ui_request" {
@@ -338,13 +376,19 @@ fn on_agent_event(app: &AppHandle, e: AgentEvent, log: &Mutex<Option<std::fs::Fi
             if let Some(ev) = rpc::stderr_event(&line) {
                 emit_ui(app, &ev);
             }
-            eprintln!("{line}");
+            let red = app.state::<AppState>().redactor.lock().unwrap().clone();
+            eprintln!("{}", red.line(&line));
         }
         AgentEvent::Exited { code, reason, stderr_tail } => {
             let state = app.state::<AppState>();
             let n = state.pending.cancel_all();
             if let Some(svc) = state.service.lock().unwrap().as_ref() {
                 svc.clear_gate_env();
+                svc.end_task(match reason { ExitReason::Finished => "finished", ExitReason::Stopped => "stopped",
+                                            ExitReason::Crashed => "crashed", ExitReason::Disconnected => "disconnected" });
+            }
+            if let Some(t) = state.task.lock().unwrap().take() {
+                t.remove();
             }
             *state.agent.lock().unwrap() = None;
             emit_ui(app, &proc::exit_event(code, reason, &stderr_tail, n));
@@ -360,6 +404,12 @@ fn start_task(app: AppHandle, state: tauri::State<AppState>, task: String) -> Re
     if state.agent.lock().unwrap().as_ref().map(|a| !a.has_exited()).unwrap_or(false) {
         return Err("a task is already running".into());
     }
+    // the person's own words: the only thing that ever goes into the task file
+    let words = UserWords::from_ui(&task).ok_or("type what the agent should do")?;
+    let blocked = state.checks.lock().unwrap().get("blocked").and_then(|b| b.as_str()).map(String::from);
+    if let Some(why) = blocked {
+        return Err(why);
+    }
     let s = state.settings.lock().unwrap().clone();
     let keys = state.keys.lock().unwrap().clone();
     let ipc = state.ipc.lock().unwrap().clone().ok_or("the ask-a-person service is not running, so no task can start (see the log)")?;
@@ -367,7 +417,17 @@ fn start_task(app: AppHandle, state: tauri::State<AppState>, task: String) -> Re
     let p = paths(&app);
     private_dir(&p.data);
     private_dir(&p.data.join("logs"));
-    let l = launch::build(&s, keys.as_ref(), &p, &task, Some((ipc.0.as_str(), ipc.1.as_str()))).map_err(|e| e.join("\n"))?;
+    let task_id = format!("{}-{}", std::process::id(), TASK_SEQ.fetch_add(1, Ordering::SeqCst));
+    let tf = TaskFile::create(&runtime_dir(&app), &task_id, &words).map_err(|e| format!("cannot write the task file: {e}"))?;
+    let l = match launch::build(&s, keys.as_ref(), &p, words.as_str(), Some(&tf.path), Some((ipc.0.as_str(), ipc.1.as_str()))) {
+        Ok(l) => l,
+        Err(e) => {
+            tf.remove();
+            return Err(e.join("\n"));
+        }
+    };
+    *state.redactor.lock().unwrap() = Redactor::for_launch(keys.as_ref(), &l);
+    svc.begin_task(&task_id);
     for (f, c) in &l.files {
         if let Some(d) = f.parent() { private_dir(&d.to_path_buf()); }
         std::fs::write(f, c).map_err(|e| e.to_string())?;
@@ -382,13 +442,31 @@ fn start_task(app: AppHandle, state: tauri::State<AppState>, task: String) -> Re
         Ok(a) => Arc::new(a),
         Err(e) => {
             svc.clear_gate_env();
+            svc.end_task("not_started");
+            tf.remove();
             return Err(format!("cannot start the agent: {e}"));
         }
     };
     *state.agent.lock().unwrap() = Some(agent.clone());
-    *state.last_task.lock().unwrap() = Some(task.clone());
-    agent.send(&rpc::prompt("task-1", &task)).map_err(|e| format!("the agent did not accept the task: {e}"))?;
+    *state.task.lock().unwrap() = Some(tf);
+    *state.last_task.lock().unwrap() = Some(words.as_str().to_string());
+    agent.send(&rpc::prompt("task-1", words.as_str())).map_err(|e| format!("the agent did not accept the task: {e}"))?;
     Ok(())
+}
+
+/// A later message from the person while the task runs: into the task file first (the gate re-reads it), then to
+/// Pi as a steering prompt. Only this command and start_task write the task file.
+#[tauri::command]
+fn send_message(state: tauri::State<AppState>, text: String) -> Result<(), String> {
+    let words = UserWords::from_ui(&text).ok_or("empty message")?;
+    let agent = state.agent.lock().unwrap().clone().filter(|a| !a.has_exited()).ok_or("no task is running")?;
+    {
+        let mut t = state.task.lock().unwrap();
+        let tf = t.as_mut().ok_or("no task is running")?;
+        tf.add(&words).map_err(|e| format!("cannot update the task file: {e}"))?;
+    }
+    let id = format!("msg-{}", MSG_SEQ.fetch_add(1, Ordering::SeqCst));
+    agent.send(&task::steer_line(&id, &words)).map_err(|e| format!("the agent did not take the message: {e}"))
 }
 
 /// Start the last task again (after a crash).
@@ -398,14 +476,68 @@ fn restart_task(app: AppHandle, state: tauri::State<AppState>) -> Result<(), Str
     start_task(app, state, t)
 }
 
-/// Stop: cancel any open question, ask Pi to abort, then end the process.
+/// Stop: cancel any open question; the extension blocks every action, sends gate_reset (when the gate has it) and
+/// kills the gate; then Pi and everything it started are killed. Nothing is sent after this; a new task starts
+/// fresh processes.
 #[tauri::command]
 fn stop_task(state: tauri::State<AppState>) {
+    stop_now(&state);
+}
+
+fn stop_now(state: &AppState) {
     state.pending.cancel_all();
-    if let Some(a) = state.agent.lock().unwrap().clone() {
-        let _ = a.send(&rpc::abort());
-        a.stop(true);
+    let agent = state.agent.lock().unwrap().clone();
+    if let Some(a) = agent {
+        let svc = state.service.lock().unwrap().clone();
+        if let Some(svc) = svc {
+            let _ = svc.signal_stop(STOP_ACK_WAIT);
+        }
+        a.kill_tree();
     }
+}
+
+/// Startup: Linux self-check, bundle integrity against the shipped SHA256SUMS (a mismatch blocks Start), and - when
+/// allowed in the settings - an "update available" notice from the latest public release. Nothing is installed.
+fn startup_checks(app: &AppHandle, keychain: bool, update_check: bool) {
+    let checks = selfcheck::evaluate(&selfcheck::gather(keychain));
+    let integ = integrity::verify(&resources_dir(app));
+    let mut blocked = None;
+    if integ.blocks_start() {
+        blocked = Some(integ.message());
+    } else if !selfcheck::can_start(&checks) {
+        blocked = Some(format!("This desktop session cannot run the agent: {}",
+            checks.iter().filter(|c| c.level == "fail").map(|c| c.message.clone()).collect::<Vec<_>>().join(" ")));
+    }
+    let v = json!({"system": checks, "integrity": {"ok": !integ.blocks_start(), "unverified": integ.unverified, "message": integ.message()},
+                   "blocked": blocked, "update": Value::Null, "version": env!("CARGO_PKG_VERSION")});
+    *app.state::<AppState>().checks.lock().unwrap() = v;
+    if headless() {
+        for c in &checks {
+            eprintln!("[self-check] {}: {} - {}", c.id, c.level, c.message);
+        }
+        eprintln!("[self-check] bundle: {}", integ.message());
+    }
+    if update_check {
+        let a = app.clone();
+        std::thread::spawn(move || {
+            let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).build();
+            let Ok(r) = agent.get(integrity::LATEST_RELEASE_API).set("User-Agent", "gui-pi-desktop").set("Accept", "application/vnd.github+json").call() else { return };
+            let Ok(body) = r.into_string() else { return };
+            if let Some(n) = integrity::update_notice(env!("CARGO_PKG_VERSION"), &body) {
+                a.state::<AppState>().checks.lock().unwrap()["update"] = json!(n);
+                emit_ui(&a, &rpc::UiEvent::new("notice", n));
+            }
+        });
+    }
+}
+
+#[tauri::command]
+fn self_check(app: AppHandle, state: tauri::State<AppState>) -> Value {
+    let keychain = state.keys.lock().unwrap().kind() == "keychain";
+    let update = state.checks.lock().unwrap().get("update").cloned().unwrap_or(Value::Null);
+    startup_checks(&app, keychain, false);
+    state.checks.lock().unwrap()["update"] = update;
+    state.checks.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -422,12 +554,7 @@ fn shutdown(app: &AppHandle) {
         svc.set_closing();
         svc.clear_gate_env();
     }
-    state.pending.cancel_all();
-    let agent = state.agent.lock().unwrap().clone();
-    if let Some(a) = agent {
-        let _ = a.send(&rpc::abort());
-        a.stop(true);
-    }
+    stop_now(&state);
 }
 
 fn main() {
@@ -441,8 +568,15 @@ fn main() {
             let cfg = config_dir(&h).join("config.json");
             let settings = std::fs::read_to_string(&cfg).ok().and_then(|j| Settings::load(&j).ok()).unwrap_or_default();
             let keys: Arc<dyn KeyStore> = if keychain_works() { Arc::new(KeyringStore) } else { Arc::new(MemoryStore::default()) };
+            let keychain = keys.kind() == "keychain";
+            let update_check = settings.update_check;
             app.manage(AppState { settings: Mutex::new(settings), keys: Mutex::new(keys), agent: Mutex::new(None), last_task: Mutex::new(None),
-                                  pending: Arc::new(Pending::default()), service: Mutex::new(None), ipc: Mutex::new(None) });
+                                  pending: Arc::new(Pending::default()), service: Mutex::new(None), ipc: Mutex::new(None),
+                                  task: Mutex::new(None), redactor: Mutex::new(Redactor::default()),
+                                  checks: Mutex::new(json!({"pending": true, "blocked": CHECKING})) });
+            // hashing the bundle takes a moment: off the UI thread; Start waits for it
+            let h3 = h.clone();
+            std::thread::spawn(move || startup_checks(&h3, keychain, update_check));
             match start_human_service(&h) {
                 Ok((svc, x)) => {
                     let st = h.state::<AppState>();
@@ -455,6 +589,10 @@ fn main() {
                 let h2 = h.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_millis(500));
+                    for _ in 0..600 {
+                        if h2.state::<AppState>().checks.lock().unwrap().get("pending").is_none() { break; }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                     if let Err(e) = start_task(h2.clone(), h2.state::<AppState>(), t) { eprintln!("{e}"); h2.exit(3); }
                 });
             }
@@ -470,7 +608,7 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![get_settings, save_settings, set_key, use_memory_keys, test_model, popup_answer,
-                                                 start_task, restart_task, stop_task, open_settings])
+                                                 start_task, send_message, restart_task, stop_task, open_settings, self_check])
         .build(tauri::generate_context!())
         .expect("error while building gui-pi-desktop");
     app.run(|h, event| match event {

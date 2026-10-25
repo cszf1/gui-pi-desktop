@@ -57,6 +57,12 @@ pub fn spawn(program: &Path, args: &[String], env: &[(String, String)], cwd: Opt
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).env_clear();
     cmd.envs(env.iter().map(|(k, v)| (k, v)));
+    // its own process group: Stop ends Pi, the gate and the driver together (kill_tree)
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     if let Some(d) = cwd {
         cmd.current_dir(d);
     }
@@ -188,6 +194,21 @@ impl Agent {
         });
     }
 
+    /// Stop now: kill Pi and everything it started (the gate, the driver: the whole process group). Used by Stop
+    /// after the extension acknowledged (or did not acknowledge in time): no step can be sent after this returns.
+    pub fn kill_tree(&self) {
+        self.stop_requested.store(true, Ordering::SeqCst);
+        self.settled.store(false, Ordering::SeqCst);
+        *self.stdin.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let mut c = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(unix)]
+        unsafe {
+            // the group id is Pi's pid (process_group(0)); negative = the whole group
+            libc::kill(-(c.id() as i32), libc::SIGKILL);
+        }
+        let _ = c.kill();
+    }
+
     pub fn is_settled(&self) -> bool {
         self.settled.load(Ordering::SeqCst)
     }
@@ -307,6 +328,47 @@ mod tests {
         let (_, e) = until_exit(&rx);
         assert!(matches!(e, AgentEvent::Exited { reason: ExitReason::Stopped, .. }), "{e:?}");
         assert!(!exit_event(None, ExitReason::Stopped, "", 0).restart);
+    }
+
+    fn alive(pid: u32) -> bool {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    /// Stop with fake children: a fake Pi starts a fake gate that "sends an action" (a line in a file) every 50 ms.
+    /// After kill_tree both are gone and no action follows; a new task starts fresh processes.
+    #[test]
+    fn stop_kills_pi_and_the_gate_and_no_action_follows() {
+        let dir = std::env::temp_dir().join(format!("gpd-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let acts = dir.join("actions.txt");
+        let gate_pid = dir.join("gate.pid");
+        let script = format!("(echo $$ > /dev/null; while :; do echo act >> {a}; sleep 0.05; done) & echo $! > {g}; while :; do sleep 1; done",
+                             a = acts.display(), g = gate_pid.display());
+        let (a, rx) = sh(&script);
+        let t0 = Instant::now();
+        while !(gate_pid.exists() && acts.exists()) && t0.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        let gpid: u32 = std::fs::read_to_string(&gate_pid).unwrap().trim().parse().unwrap();
+        let pi_pid = a.pid();
+        assert!(alive(gpid) && alive(pi_pid));
+        a.kill_tree();
+        let (_, e) = until_exit(&rx);
+        assert!(matches!(e, AgentEvent::Exited { reason: ExitReason::Stopped, .. }), "{e:?}");
+        std::thread::sleep(Duration::from_millis(100));
+        let n = std::fs::read_to_string(&acts).unwrap().lines().count();
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(std::fs::read_to_string(&acts).unwrap().lines().count(), n, "an action was sent after Stop");
+        assert!(!alive(gpid), "the gate survived Stop");
+        assert!(a.send("{}").is_err());
+        // a new task: fresh processes
+        let (b, rx2) = sh("echo started; while :; do sleep 1; done");
+        assert_ne!(b.pid(), pi_pid);
+        assert!(matches!(rx2.recv_timeout(Duration::from_secs(5)).unwrap(), AgentEvent::Line(l) if l == "started"));
+        b.kill_tree();
+        let _ = until_exit(&rx2);
     }
 
     #[test]

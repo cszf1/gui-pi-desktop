@@ -16,11 +16,13 @@ use std::path::{Path, PathBuf};
 
 pub const MAIN_KEY_ENV: &str = "GUI_PI_MAIN_KEY";
 pub const PROVIDER: &str = "gui-main";
-/// the tools Pi may call: the gate's GUI tools + the extension's note_fact (Pi's own bash/read/edit/write are not in
-/// the list; gate_task / gate_confirm / gate_config are never offered)
+/// the tools Pi may call: the gate's GUI tools + the extension's own (note_fact, pin_evidence, recall_image,
+/// load_skill). Pi's own bash/read/edit/write are not in the list; gate_task / gate_confirm / gate_config and the
+/// client-only gate_next_step / gate_reset are never offered.
 pub const PI_TOOLS: &[&str] = &["list_apps", "list_windows", "get_window_state", "launch_app", "bring_to_front", "click",
     "double_click", "right_click", "type_text", "press_key", "hotkey", "scroll", "set_value", "drag", "invoke_menu",
-    "run_actions", "run_command", "request_human", "set_plan", "check_done", "gate_report", "inspect", "note_fact"];
+    "run_actions", "run_command", "request_human", "set_plan", "check_done", "gate_report", "inspect",
+    "note_fact", "pin_evidence", "recall_image", "load_skill"];
 /// Never set by the desktop launcher, never inherited from the shell's own environment.
 pub const FORBIDDEN_ENV: &[&str] = &["GUI_GATE_ALLOW_CONFIG", "GUI_PI_GATE_ARGS"];
 pub const FORBIDDEN_ARGS: &[&str] = &["--allow-config"];
@@ -74,6 +76,36 @@ impl Launch {
 
 pub fn is_secret(k: &str) -> bool {
     k.ends_with("_KEY") || k.contains("TOKEN")
+}
+
+/// Masks every key value the shell holds in what it logs or shows (the agent's RPC lines, stderr, UI events).
+#[derive(Clone, Default)]
+pub struct Redactor {
+    values: Vec<String>,
+}
+
+impl Redactor {
+    pub fn new(values: impl IntoIterator<Item = String>) -> Redactor {
+        let mut v: Vec<String> = values.into_iter().map(|s| s.trim().to_string()).filter(|s| s.len() >= 8).collect();
+        v.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        v.dedup();
+        Redactor { values: v }
+    }
+    /// From a key store and a launch: every slot's key + every secret-looking variable the launch sets.
+    pub fn for_launch(keys: &dyn KeyStore, l: &Launch) -> Redactor {
+        let mut v: Vec<String> = crate::config::all_slots().iter().filter_map(|s| keys.get(s)).collect();
+        v.extend(l.env.iter().chain(l.gate_env.iter()).filter(|(k, _)| is_secret(k)).map(|(_, v)| v.clone()));
+        Redactor::new(v)
+    }
+    pub fn line(&self, s: &str) -> String {
+        let mut out = s.to_string();
+        for v in &self.values {
+            if out.contains(v.as_str()) {
+                out = out.replace(v.as_str(), "***");
+            }
+        }
+        out
+    }
 }
 
 /// The complete environment of the Pi process: the allowlisted variables of `parent` (never a GUI_GATE_*, GUI_PI_*,
@@ -135,8 +167,9 @@ pub fn gate_env(s: &Settings, keys: &dyn KeyStore, p: &Paths) -> Vec<(String, St
     env
 }
 
-/// Build the launch. `task` is the user's request verbatim (the gate treats it as the operator's own words).
-pub fn build(s: &Settings, keys: &dyn KeyStore, p: &Paths, task: &str, human_ipc: Option<(&str, &str)>) -> Result<Launch, Vec<String>> {
+/// Build the launch. `task` is the user's request verbatim; `task_file` the trusted task channel the shell writes
+/// (task::TaskFile) and the gate reads with --task-file (the gate treats it as the operator's own words).
+pub fn build(s: &Settings, keys: &dyn KeyStore, p: &Paths, task: &str, task_file: Option<&Path>, human_ipc: Option<(&str, &str)>) -> Result<Launch, Vec<String>> {
     let errs = s.validate(&|slot| keys.has(slot));
     if !errs.is_empty() {
         return Err(errs);
@@ -151,6 +184,10 @@ pub fn build(s: &Settings, keys: &dyn KeyStore, p: &Paths, task: &str, human_ipc
         env.push(("GUI_PI_DRIVER".into(), d.display().to_string()));
     }
     env.push(("GUI_PI_TASK".into(), task.into()));
+    if let Some(tf) = task_file {
+        env.push(("GUI_PI_TASK_FILE".into(), tf.display().to_string()));
+    }
+    env.push(("GUI_PI_SKILLS".into(), p.skills.display().to_string()));
     env.push(("GUI_PI_HUMAN_TIMEOUT".into(), s.human_timeout_s.to_string()));
     env.push(("GUI_PI_GATE_LOG".into(), p.data.join("logs").join("gate.jsonl").display().to_string()));
     let mut genv = gate_env(s, keys, p);
@@ -217,7 +254,7 @@ mod tests {
     #[test]
     fn keys_only_in_env_never_in_files_or_args() {
         let (s, k, p, _) = setup();
-        let l = build(&s, &k, &p, "rename the file", Some(("/run/x.sock", "tok"))).unwrap();
+        let l = build(&s, &k, &p, "rename the file", None, Some(("/run/x.sock", "tok"))).unwrap();
         let pi = |n: &str| l.env.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
         let gate = |n: &str| l.gate_env.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
         assert_eq!(pi("GUI_PI_MAIN_KEY").as_deref(), Some("sk-main-secret-0001"));
@@ -245,7 +282,7 @@ mod tests {
         let (mut s, k, p, _) = setup();
         s.roles.insert("planner".into(), RoleCfg::Custom { model: ModelCfg { base_url: "https://p.example.com".into(), ..Default::default() } });
         k.set("role.planner", "sk-planner-secret-0003").unwrap();
-        let l = build(&s, &k, &p, "x", Some(("/run/x.sock", "tok"))).unwrap();
+        let l = build(&s, &k, &p, "x", None, Some(("/run/x.sock", "tok"))).unwrap();
         assert!(!l.gate_env_in_pi);
         assert!(l.env.iter().all(|(k, _)| !k.starts_with("GUI_GATE_")), "{:?}", l.redacted_env());
         let pi_env = child_env(vec![("PATH".into(), "/usr/bin".into()), ("GUI_GATE_REVIEWER_KEY".into(), "sk-parent".into()),
@@ -260,7 +297,7 @@ mod tests {
         assert!(!g.contains("sk-main-secret-0001") && !g.contains("GUI_PI_") && !g.contains("tok"));
         // a role that inherits the main model gets the main key in the GATE's variables (it needs it), still not Pi's others
         s.roles.insert("judge".into(), RoleCfg::Main);
-        let l = build(&s, &k, &p, "x", Some(("/run/x.sock", "tok"))).unwrap();
+        let l = build(&s, &k, &p, "x", None, Some(("/run/x.sock", "tok"))).unwrap();
         assert!(l.gate_env.iter().any(|(k, v)| k == "GUI_GATE_ROLE_JUDGE_KEY" && v == "sk-main-secret-0001"));
     }
 
@@ -268,7 +305,7 @@ mod tests {
     fn the_launcher_never_allows_gate_config() {
         let (s, k, p, _) = setup();
         for ipc in [Some(("/run/x.sock", "tok")), None] {
-            let l = build(&s, &k, &p, "x --allow-config", ipc).unwrap();
+            let l = build(&s, &k, &p, "x --allow-config", None, ipc).unwrap();
             let all: Vec<&(String, String)> = l.env.iter().chain(l.gate_env.iter()).collect();
             assert!(all.iter().all(|(k, _)| k != "GUI_GATE_ALLOW_CONFIG" && k != "GUI_PI_GATE_ARGS"));
             assert!(all.iter().all(|(_, v)| !v.contains("--allow-config") || v == "x --allow-config"));
@@ -277,14 +314,86 @@ mod tests {
             assert!(child_env(parent, &l).iter().all(|(k, _)| k != "GUI_GATE_ALLOW_CONFIG" && k != "GUI_PI_GATE_ARGS"));
         }
         // without a person IPC (dev runs) the gate variables travel in Pi's environment, and the launch says so
-        let l = build(&s, &k, &p, "x", None).unwrap();
+        let l = build(&s, &k, &p, "x", None, None).unwrap();
         assert!(l.gate_env_in_pi && l.gate_env.is_empty() && l.env.iter().any(|(k, _)| k == "GUI_GATE_REVIEWER_KEY"));
     }
+    /// Item 11, shell side, end to end with fake keys in the keychain mock: Pi (a fake child that dumps its
+    /// environment and echoes keys on stdout/stderr) gets only its own key; the gate's keys are only handed over
+    /// through the person IPC, once, with the token; whatever the children print reaches the log and the UI masked.
+    #[cfg(unix)]
+    #[test]
+    fn fake_keys_reach_only_the_intended_child_and_never_a_log() {
+        use crate::human::{Outcome, Popup, Service};
+        use crate::proc::{self, AgentEvent, OnEvent};
+        use std::sync::{mpsc::channel, Arc, Mutex};
+        let (mut s, k, p, dir) = setup();
+        s.roles.insert("planner".into(), RoleCfg::Custom { model: ModelCfg { base_url: "https://p.example.com".into(), ..Default::default() } });
+        k.set("role.planner", "sk-fake-planner-key-777").unwrap();
+        let tf = dir.join("task.txt");
+        let l = build(&s, &k, &p, "rename the file", Some(&tf), Some(("/run/x.sock", "tok-ipc-secret-123"))).unwrap();
+        assert!(l.env.iter().any(|(k, v)| k == "GUI_PI_TASK_FILE" && v == &tf.display().to_string()));
+        let red = Redactor::for_launch(&k, &l);
+        // the shell's own environment holds gate-looking secrets too: none may be inherited
+        let parent = vec![("PATH".to_string(), "/usr/bin:/bin".to_string()), ("GUI_GATE_REVIEWER_KEY".to_string(), "sk-parent-gate-key-1".to_string()),
+                          ("ANTHROPIC_API_KEY".to_string(), "sk-parent-other-key-2".to_string())];
+        let env = child_env(parent, &l);
+        let dump = dir.join("pi-env.txt");
+        let script = format!("env > {}; echo \"{{\\\"type\\\":\\\"message_end\\\",\\\"message\\\":{{\\\"role\\\":\\\"assistant\\\",\\\"content\\\":[{{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"my key is $GUI_PI_MAIN_KEY\\\"}}]}}}}\"; echo \"oops $GUI_PI_MAIN_KEY $GUI_PI_HUMAN_TOKEN\" >&2; exit 0", dump.display());
+        let log = Arc::new(Mutex::new(String::new()));
+        let shown = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (tx, rx) = channel();
+        let tx = Mutex::new(tx);
+        let (l2, s2, r2) = (log.clone(), shown.clone(), red.clone());
+        let on: OnEvent = Arc::new(move |e| {
+            // what the shell does with each event: log the line masked, show the UI text masked
+            match &e {
+                AgentEvent::Line(x) => {
+                    l2.lock().unwrap().push_str(&r2.line(x));
+                    if let Some(ev) = crate::rpc::ui_event(x) {
+                        s2.lock().unwrap().push(r2.line(&ev.text));
+                    }
+                }
+                AgentEvent::Stderr(x) => l2.lock().unwrap().push_str(&r2.line(x)),
+                _ => {}
+            }
+            let _ = tx.lock().unwrap().send(e);
+        });
+        let _a = proc::spawn(std::path::Path::new("/bin/sh"), &["-c".into(), script], &env, None, on).unwrap();
+        loop {
+            if let AgentEvent::Exited { .. } = rx.recv_timeout(std::time::Duration::from_secs(15)).unwrap() {
+                break;
+            }
+        }
+        let pi_env = std::fs::read_to_string(&dump).unwrap();
+        assert!(pi_env.contains("GUI_PI_MAIN_KEY=sk-main-secret-0001"));
+        for bad in ["sk-rev-secret-0002", "sk-fake-planner-key-777", "sk-parent-gate-key-1", "sk-parent-other-key-2", "GUI_GATE_"] {
+            assert!(!pi_env.contains(bad), "{bad} in Pi's environment");
+        }
+        // the gate's keys: only through the IPC hand-over, once, with the token
+        let popup: Popup = Arc::new(|_, _| Outcome::Yes);
+        let svc = Service::new("tok-ipc-secret-123".into(), popup);
+        svc.stage_gate_env(l.gate_env.clone());
+        assert_eq!(svc.handle_line(r#"{"token":"wrong","op":"gate_env"}"#)["env"], serde_json::json!({}));
+        let got = svc.handle_line(r#"{"token":"tok-ipc-secret-123","op":"gate_env"}"#)["env"].clone();
+        assert_eq!(got["GUI_GATE_REVIEWER_KEY"], "sk-rev-secret-0002");
+        assert_eq!(got["GUI_GATE_ROLE_PLANNER_KEY"], "sk-fake-planner-key-777");
+        assert!(!got.to_string().contains("sk-main-secret-0001") && !got.to_string().contains("tok-ipc-secret-123"));
+        assert_eq!(svc.handle_line(r#"{"token":"tok-ipc-secret-123","op":"gate_env"}"#)["env"], serde_json::json!({}));
+        // logs and the timeline: masked
+        let log = log.lock().unwrap().clone();
+        assert!(log.contains("my key is ***") && log.contains("oops *** ***"), "{log}");
+        for key in ["sk-main-secret-0001", "sk-rev-secret-0002", "sk-fake-planner-key-777", "tok-ipc-secret-123"] {
+            assert!(!log.contains(key), "{key} in the log");
+            assert!(shown.lock().unwrap().iter().all(|t| !t.contains(key)), "{key} shown");
+        }
+        assert!(l.redacted_env().iter().all(|(_, v)| !v.contains("secret") && !v.contains("sk-fake")));
+    }
+
     #[test]
     fn no_launch_without_reviewer_key() {
         let (s, k, p, _) = setup();
         k.delete("reviewer").unwrap();
-        let e = build(&s, &k, &p, "x", None).unwrap_err();
+        let e = build(&s, &k, &p, "x", None, None).unwrap_err();
         assert!(e.iter().any(|x| x.contains("Reviewer")));
     }
 }

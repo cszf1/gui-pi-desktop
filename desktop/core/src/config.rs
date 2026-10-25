@@ -54,6 +54,9 @@ pub struct Settings {
     /// the 0.9.7+ gate features (plan, check_done, inspect, loop breaker...), on by default like the v0.9.9 bench
     #[serde(default = "yes")]
     pub gate_097: bool,
+    /// look up the latest release at start and show an "update available" notice (never installs anything)
+    #[serde(default = "yes")]
+    pub update_check: bool,
 }
 
 fn default_timeout() -> u32 {
@@ -71,6 +74,7 @@ impl Default for Settings {
             roles: ROLES.iter().map(|r| (r.to_string(), RoleCfg::Off)).collect(),
             human_timeout_s: 120,
             gate_097: true,
+            update_check: true,
         }
     }
 }

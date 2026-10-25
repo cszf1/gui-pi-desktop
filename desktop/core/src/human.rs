@@ -2,7 +2,12 @@
 //!   request  {"token","id","kind","message","schema","timeout_s","deadline_ms","meta"}
 //!   reply    {"id","action":"accept"|"decline"|"cancel","content":{...},"reason"?}
 //!   request  {"token","op":"gate_env"}  ->  {"env":{GUI_GATE_*...}}   once per task (one-shot), then {"env":{}}
+//!   request  {"token","op":"watch_stop"}  ->  (held open) {"stop":true} when the user presses Stop
+//!            -> the extension answers {"ack":"stopped","reset":bool} after blocking actions, gate_reset, killing the gate
 //! The shell shows a native popup per request (one at a time) and maps the button to the kind's form.
+//! Four strict result types share one popup component (`view`): approve {decision}, clarify {answer} (the gate's
+//! "answer" form), takeover {done}, help {choice, note} (the gate's "ask_help" form). Per task the service records
+//! what asking cost the person (`Metrics`) and writes it to the session log (`human.jsonl`) for bench/human_pilot.py.
 //! A wrong token, an unknown kind, a closed popup, the app quitting or the deadline passing is never an approval;
 //! every refusal carries its reason (declined / cancelled / timed_out / closed / unavailable). Each request id is
 //! answered once: a repeated id is refused without a popup, and only the first click on a popup counts.
@@ -15,7 +20,29 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const KINDS: &[&str] = &["approve", "answer", "takeover", "ask_help"];
+pub const KINDS: &[&str] = &["approve", "answer", "takeover", "ask_help", "clarify", "help"];
+
+/// The gate's form for a kind (clarify uses the answer form, help the ask_help form).
+pub fn form_of(kind: &str) -> &'static str {
+    match kind {
+        "approve" => "approve",
+        "answer" | "clarify" => "answer",
+        "takeover" => "takeover",
+        "ask_help" | "help" => "ask_help",
+        _ => "",
+    }
+}
+
+/// The result type the person sees: approve | clarify | takeover | help.
+pub fn type_of(kind: &str) -> &'static str {
+    match form_of(kind) {
+        "approve" => "approve",
+        "answer" => "clarify",
+        "takeover" => "takeover",
+        "ask_help" => "help",
+        _ => "",
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct Request {
@@ -70,7 +97,7 @@ pub fn reason(o: &Outcome) -> Option<&'static str> {
 
 /// For the main window's timeline: what happened to a question. Everything but a yes / an answer is a refusal.
 pub fn label(kind: &str, o: &Outcome) -> (&'static str, bool) {
-    match (kind, o) {
+    match (form_of(kind), o) {
         ("approve", Outcome::Yes) => ("allowed", false),
         ("approve", Outcome::No(_)) => ("declined", true),
         ("takeover", Outcome::Yes) | ("ask_help", Outcome::Yes) => ("done by the person", false),
@@ -92,7 +119,7 @@ fn refusal(action: &str, why: &str) -> Value {
 /// Popup button -> the kind's ElicitResult. Closing the window or quitting is a cancel; a timeout or no popup
 /// is a decline; both are refusals with their reason.
 pub fn to_elicit(kind: &str, o: &Outcome) -> Value {
-    match (kind, o) {
+    match (form_of(kind), o) {
         (_, Outcome::Closed) => refusal("cancel", "closed"),
         (_, Outcome::Cancelled) => refusal("cancel", "cancelled"),
         (_, Outcome::Timeout) => refusal("decline", "timed_out"),
@@ -107,6 +134,178 @@ pub fn to_elicit(kind: &str, o: &Outcome) -> Value {
         _ => refusal("decline", "declined"),
     }
 }
+
+fn strs(v: Option<&Value>, max: usize) -> Vec<String> {
+    match v {
+        Some(Value::Array(a)) => a.iter().filter_map(|x| match x {
+            Value::String(s) => Some(s.clone()),
+            Value::Object(o) => o.get("text").or(o.get("label")).or(o.get("method")).or(o.get("step")).and_then(|t| t.as_str()).map(String::from),
+            _ => None,
+        }).filter(|s| !s.trim().is_empty()).take(max).map(|s| s.chars().take(200).collect()).collect(),
+        Some(Value::String(s)) if !s.trim().is_empty() => vec![s.chars().take(200).collect()],
+        _ => vec![],
+    }
+}
+
+fn s_of(m: &Value, keys: &[&str]) -> String {
+    for k in keys {
+        match m.get(*k) {
+            Some(Value::String(s)) if !s.trim().is_empty() => return s.chars().take(300).collect(),
+            Some(v @ Value::Array(_)) => {
+                let l = strs(Some(v), 6);
+                if !l.is_empty() {
+                    return l.join(", ");
+                }
+            }
+            _ => {}
+        }
+    }
+    String::new()
+}
+
+/// What the one shared popup component shows, per result type, from the gate's request (message + `_meta`).
+/// Field names the gate may use are read tolerantly; what is missing is left empty, never invented.
+///   approve   object (what exactly), scope (how much / where), consequence (what happens on Allow)
+///   clarify   the question, options {label, value, effect: how this answer changes what happens next}, free text
+///   takeover  the minimal steps the person must do; the agent's input is paused; Done never re-runs the action
+///   help      what the agent tried; "I did it for you" or "Give a hint"
+pub fn view(req: &Request) -> Value {
+    let m = if req.meta.is_object() { req.meta.clone() } else { json!({}) };
+    let ty = type_of(&req.kind);
+    let effect = m.get("effect").cloned().unwrap_or(Value::Null);
+    let mut v = json!({"type": ty, "kind": req.kind, "message": req.message.chars().take(2000).collect::<String>()});
+    match ty {
+        "approve" => {
+            let object = {
+                let o = s_of(&m, &["object", "target"]);
+                if o.is_empty() { s_of(&effect, &["resources"]) } else { o }
+            };
+            let scope = {
+                let o = s_of(&m, &["scope"]);
+                if !o.is_empty() { o } else {
+                    let r = strs(effect.get("resources"), 20);
+                    let app = s_of(&effect, &["app", "window"]);
+                    let mut parts = vec![];
+                    if r.len() > 1 { parts.push(format!("{} items", r.len())); }
+                    if !app.is_empty() { parts.push(format!("in {app}")); }
+                    parts.join(" ")
+                }
+            };
+            let consequence = {
+                let o = s_of(&m, &["consequence"]);
+                if !o.is_empty() { o } else {
+                    let hz = s_of(&effect, &["hazard"]);
+                    let tool = s_of(&m, &["tool"]);
+                    if hz.is_empty() && tool.is_empty() { String::new() } else {
+                        format!("Allow runs this {}{} step now.", tool.replace('_', " "), if hz.is_empty() { String::new() } else { format!(" ({hz})") })
+                    }
+                }
+            };
+            v["object"] = json!(object);
+            v["scope"] = json!(scope);
+            v["consequence"] = json!(consequence);
+            v["reason"] = json!(s_of(&m, &["reason"]));
+            v["buttons"] = json!([{"choice": "no", "label": "Deny"}, {"choice": "yes", "label": "Allow"}]);
+        }
+        "clarify" => {
+            let opts: Vec<Value> = match m.get("options") {
+                Some(Value::Array(a)) => a.iter().take(8).filter_map(|o| match o {
+                    Value::String(s) => Some(json!({"label": s, "value": s, "effect": ""})),
+                    Value::Object(x) => {
+                        let label = x.get("label").or(x.get("text")).or(x.get("value")).and_then(|t| t.as_str())?;
+                        let value = x.get("value").and_then(|t| t.as_str()).unwrap_or(label);
+                        let eff = x.get("effect").or(x.get("consequence")).or(x.get("then")).and_then(|t| t.as_str()).unwrap_or("");
+                        Some(json!({"label": label.chars().take(120).collect::<String>(), "value": value.chars().take(500).collect::<String>(),
+                                    "effect": eff.chars().take(240).collect::<String>()}))
+                    }
+                    _ => None,
+                }).collect(),
+                _ => vec![],
+            };
+            v["free_text"] = json!(opts.is_empty() || m.get("allow_other").and_then(|b| b.as_bool()).unwrap_or(true));
+            v["options"] = json!(opts);
+            v["buttons"] = json!([{"choice": "no", "label": "Don't answer"}]);
+        }
+        "takeover" => {
+            v["steps"] = json!(strs(m.get("steps").or(m.get("todo")), 8));
+            v["paused"] = json!("The agent's input is paused until you answer.");
+            v["note"] = json!("Done tells the agent you did it; it will not repeat the step.");
+            v["buttons"] = json!([{"choice": "no", "label": "I won't do it"}, {"choice": "yes", "label": "Done"}]);
+        }
+        "help" => {
+            v["tried"] = json!(strs(m.get("tried").or(m.get("tried_methods")).or(m.get("attempts")), 6));
+            v["reason"] = json!(s_of(&m, &["reason"]));
+            v["hint"] = json!(true);
+            v["buttons"] = json!([{"choice": "no", "label": "Give a hint"}, {"choice": "yes", "label": "I did it for you"}]);
+        }
+        _ => {}
+    }
+    v
+}
+
+/// One question as the pilot log records it.
+#[derive(Clone, Debug, Serialize)]
+pub struct QuestionRec {
+    pub ty: String,
+    pub outcome: String,
+    pub refused: bool,
+    pub secs: f64,
+    pub repeated: bool,
+    pub takeover_steps: usize,
+}
+
+/// Per task: what asking cost the person. Nothing of this is shown beyond the brief timeline entry per question.
+///   person_active_s  popup up until the person answered (read, decide, do the takeover / help step)
+///   person_wait_s    task wall time with no question open (the person only watches the agent)
+///   agent_blocked_s  every second a question was open, answered or not
+pub struct Metrics {
+    pub task_id: String,
+    started: Instant,
+    seen: HashSet<String>,
+    pub recs: Vec<QuestionRec>,
+}
+
+impl Metrics {
+    pub fn new(task_id: &str) -> Metrics {
+        Metrics { task_id: task_id.into(), started: Instant::now(), seen: HashSet::new(), recs: vec![] }
+    }
+    fn key(ty: &str, msg: &str) -> String {
+        let m: String = msg.to_lowercase().chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+        format!("{ty}:{}", m.split_whitespace().collect::<Vec<_>>().join(" "))
+    }
+    pub fn record(&mut self, kind: &str, message: &str, meta: &Value, o: &Outcome, secs: f64) -> QuestionRec {
+        let ty = type_of(kind).to_string();
+        let repeated = !self.seen.insert(Metrics::key(&ty, message));
+        let (word, refused) = label(kind, o);
+        let takeover_steps = if ty == "takeover" { strs(meta.get("steps").or(meta.get("todo")), 50).len().max(1) } else { 0 };
+        let r = QuestionRec { ty, outcome: word.into(), refused, secs: (secs * 10.0).round() / 10.0, repeated, takeover_steps };
+        self.recs.push(r.clone());
+        r
+    }
+    pub fn summary(&self, end: &str) -> Value {
+        let total = self.started.elapsed().as_secs_f64();
+        let open: f64 = self.recs.iter().map(|r| r.secs).sum();
+        let active: f64 = self.recs.iter().filter(|r| !matches!(r.outcome.as_str(), "timed out" | "cancelled" | "unavailable")).map(|r| r.secs).sum();
+        let count = |w: &str| self.recs.iter().filter(|r| r.outcome == w).count();
+        let mut by_type = serde_json::Map::new();
+        for t in ["approve", "clarify", "takeover", "help"] {
+            by_type.insert(t.into(), json!(self.recs.iter().filter(|r| r.ty == t).count()));
+        }
+        let r1 = |x: f64| (x * 10.0).round() / 10.0;
+        json!({"ev": "human_summary", "schema": "gui-pi-human/1", "task": self.task_id, "end": end,
+               "asks": self.recs.len(), "by_type": by_type,
+               "repeated": self.recs.iter().filter(|r| r.repeated).count(),
+               "repeated_ratio": if self.recs.is_empty() { 0.0 } else { r1(self.recs.iter().filter(|r| r.repeated).count() as f64 / self.recs.len() as f64 * 100.0) / 100.0 },
+               "person_active_s": r1(active), "person_wait_s": r1((total - open).max(0.0)), "agent_blocked_s": r1(open),
+               "takeover_steps": self.recs.iter().map(|r| r.takeover_steps).sum::<usize>(),
+               "cancelled": count("cancelled") + count("window closed"), "timed_out": count("timed out"),
+               "declined": count("declined"), "unavailable": count("unavailable"), "task_s": r1(total)})
+    }
+}
+
+pub type LogSink = Box<dyn Fn(&Value) + Send + Sync>;
+/// One Stop request to a watching extension; it answers Some(reset) after its ack, None without one.
+type StopReq = Sender<Option<bool>>;
 
 /// Open questions, one answer each. `open` registers a question; the first `answer` for it wins, later ones are
 /// ignored (a double click, a stale popup, a replayed message); `cancel_all` ends every open question as cancelled
@@ -200,11 +399,66 @@ pub struct Service {
     seen: Mutex<HashSet<String>>,
     gate_env: Mutex<Option<Vec<(String, String)>>>,
     closing: AtomicBool,
+    metrics: Mutex<Option<Metrics>>,
+    log: Mutex<Option<LogSink>>,
+    watchers: Mutex<Vec<Sender<StopReq>>>,
 }
 
 impl Service {
     pub fn new(token: String, popup: Popup) -> Arc<Service> {
-        Arc::new(Service { token, popup, serial: Mutex::new(()), seen: Mutex::new(HashSet::new()), gate_env: Mutex::new(None), closing: AtomicBool::new(false) })
+        Arc::new(Service { token, popup, serial: Mutex::new(()), seen: Mutex::new(HashSet::new()), gate_env: Mutex::new(None),
+                           closing: AtomicBool::new(false), metrics: Mutex::new(None), log: Mutex::new(None), watchers: Mutex::new(vec![]) })
+    }
+    /// Where per-question and per-task records go (the shell: logs/human.jsonl).
+    pub fn set_log(&self, sink: LogSink) {
+        *self.log.lock().unwrap_or_else(|e| e.into_inner()) = Some(sink);
+    }
+    fn write_log(&self, v: &Value) {
+        if let Some(f) = self.log.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            f(v);
+        }
+    }
+    /// A task starts: fresh metrics; stop watchers of an earlier task are dropped.
+    pub fn begin_task(&self, task_id: &str) {
+        *self.metrics.lock().unwrap_or_else(|e| e.into_inner()) = Some(Metrics::new(task_id));
+        self.watchers.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+    /// The task ended (`end`: finished / stopped / crashed / ...): the summary goes to the log and is returned.
+    pub fn end_task(&self, end: &str) -> Option<Value> {
+        let m = self.metrics.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+        let v = m.summary(end);
+        self.write_log(&v);
+        Some(v)
+    }
+    /// Stop: tell every watching extension, wait up to `wait` for the acks. Some(reset) when one acked.
+    pub fn signal_stop(&self, wait: Duration) -> Option<bool> {
+        let ws: Vec<Sender<StopReq>> = self.watchers.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect();
+        let mut acks = vec![];
+        for w in ws {
+            let (tx, rx) = channel();
+            if w.send(tx).is_ok() {
+                acks.push(rx);
+            }
+        }
+        let deadline = Instant::now() + wait;
+        let mut out = None;
+        for rx in acks {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if let Ok(Some(reset)) = rx.recv_timeout(left) {
+                out = Some(out.unwrap_or(false) || reset);
+            }
+        }
+        out
+    }
+    /// A `watch_stop` line with the right token registers a watcher; None for anything else.
+    pub fn watch(&self, line: &str) -> Option<Receiver<StopReq>> {
+        let req: Request = serde_json::from_str(line).ok()?;
+        if req.op != "watch_stop" || !ct_eq(&req.token, &self.token) || self.closing.load(Ordering::SeqCst) {
+            return None;
+        }
+        let (tx, rx) = channel();
+        self.watchers.lock().unwrap_or_else(|e| e.into_inner()).push(tx);
+        Some(rx)
     }
     /// Stage the gate's variables for the task about to start (replaces anything not yet collected).
     pub fn stage_gate_env(&self, env: Vec<(String, String)>) {
@@ -265,6 +519,12 @@ impl Service {
         if t0.elapsed() > Duration::from_secs_f64(left + 1.0) && !matches!(o, Outcome::Cancelled) {
             o = Outcome::Timeout;
         }
+        let rec = self.metrics.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
+            .map(|m| (m.task_id.clone(), m.record(&req.kind, &req.message, &req.meta, &o, t0.elapsed().as_secs_f64())));
+        if let Some((task, r)) = rec {
+            self.write_log(&json!({"ev": "human_q", "schema": "gui-pi-human/1", "task": task, "type": r.ty, "outcome": r.outcome,
+                                   "refused": r.refused, "secs": r.secs, "repeated": r.repeated, "takeover_steps": r.takeover_steps}));
+        }
         let mut r = to_elicit(&req.kind, &o);
         r["id"] = json!(id);
         r
@@ -277,12 +537,29 @@ pub fn handle_line(line: &str, token: &str, popup: &Popup, _serial: &Mutex<()>) 
 }
 
 fn serve_conn<S: std::io::Read + Write>(s: S, rd: impl std::io::Read, svc: &Service) {
+    let mut br = BufReader::new(rd);
     let mut line = String::new();
-    if BufReader::new(rd).read_line(&mut line).is_ok() {
-        let r = svc.handle_line(line.trim());
-        let mut w = s;
-        let _ = w.write_all(format!("{r}\n").as_bytes());
+    if br.read_line(&mut line).is_err() {
+        return;
     }
+    let mut w = s;
+    if let Some(rx) = svc.watch(line.trim()) {
+        // held open until Stop (or until the service drops this watcher at the next task)
+        if let Ok(ack) = rx.recv() {
+            let _ = w.write_all(b"{\"stop\":true}\n");
+            let _ = w.flush();
+            let mut l2 = String::new();
+            let reset = match br.read_line(&mut l2) {
+                Ok(n) if n > 0 => serde_json::from_str::<Value>(l2.trim()).ok()
+                    .filter(|v| v.get("ack").is_some()).map(|v| v.get("reset").and_then(|b| b.as_bool()).unwrap_or(false)),
+                _ => None,
+            };
+            let _ = ack.send(reset);
+        }
+        return;
+    }
+    let r = svc.handle_line(line.trim());
+    let _ = w.write_all(format!("{r}\n").as_bytes());
 }
 
 /// Serve requests on a Unix socket (Linux / macOS); the socket file is 0600 in a 0700 directory.
@@ -498,6 +775,106 @@ mod tests {
         assert_eq!(auto_outcome(&r, "ask_help", &c), Outcome::No("use Ctrl+S".into()));
         assert_eq!(auto_outcome(&r, "answer", &c), Outcome::Text("q3.ods".into()));
         assert_eq!(auto_outcome(&r, "takeover", &c), Outcome::Timeout);
+    }
+
+    #[test]
+    fn four_result_types_one_view() {
+        let req = |kind: &str, meta: Value| Request { kind: kind.into(), message: "m".into(), meta, ..Default::default() };
+        // approve: the gate-confirmed object, scope, consequence
+        let v = view(&req("approve", json!({"tool": "run_command", "target": "rm -rf ~/Documents/x", "reason": "high risk",
+            "effect": {"tool": "run_command", "hazard": "delete", "resources": ["/home/u/Documents/x", "/home/u/Documents/y"], "app": "Terminal"}})));
+        assert_eq!(v["type"], "approve");
+        assert_eq!(v["object"], "rm -rf ~/Documents/x");
+        assert_eq!(v["scope"], "2 items in Terminal");
+        assert!(v["consequence"].as_str().unwrap().contains("delete"));
+        let v = view(&req("approve", json!({"object": "q3.ods", "scope": "1 file", "consequence": "q3.ods is overwritten"})));
+        assert_eq!((v["object"].as_str(), v["scope"].as_str(), v["consequence"].as_str()), (Some("q3.ods"), Some("1 file"), Some("q3.ods is overwritten")));
+        // clarify (also the gate's older "answer"): options and what each changes
+        for k in ["clarify", "answer"] {
+            let v = view(&req(k, json!({"options": [{"label": "Overwrite", "value": "overwrite", "effect": "the old file is replaced"}, "Save as copy"]})));
+            assert_eq!(v["type"], "clarify");
+            assert_eq!(v["options"][0]["effect"], "the old file is replaced");
+            assert_eq!(v["options"][1]["value"], "Save as copy");
+        }
+        assert_eq!(view(&req("answer", json!({})))["free_text"], true);
+        // takeover: minimal steps, input paused, done does not re-run
+        let v = view(&req("takeover", json!({"steps": ["Type your password", "Press Log in"]})));
+        assert_eq!(v["steps"].as_array().unwrap().len(), 2);
+        assert!(v["paused"].as_str().unwrap().contains("paused") && v["note"].as_str().unwrap().contains("will not repeat"));
+        // help (also the gate's "ask_help"): what was tried; do it for me / give a hint
+        let v = view(&req("ask_help", json!({"tried": [{"method": "click Save"}, "ctrl+s"]})));
+        assert_eq!((v["type"].as_str(), v["tried"][0].as_str(), v["tried"][1].as_str()), (Some("help"), Some("click Save"), Some("ctrl+s")));
+        let labels: Vec<&str> = v["buttons"].as_array().unwrap().iter().map(|b| b["label"].as_str().unwrap()).collect();
+        assert_eq!(labels, vec!["Give a hint", "I did it for you"]);
+        // strict results per type: the forms never mix
+        assert_eq!(to_elicit("clarify", &Outcome::Text("overwrite".into()))["content"], json!({"answer": "overwrite"}));
+        assert_eq!(to_elicit("help", &Outcome::No("use the menu".into()))["content"], json!({"choice": "try_other", "note": "use the menu"}));
+        assert_eq!(to_elicit("help", &Outcome::Yes)["content"]["choice"], "did_it");
+        assert_eq!(to_elicit("clarify", &Outcome::Yes)["action"], "decline", "a yes is not an answer");
+        assert_eq!(to_elicit("approve", &Outcome::Text("allow".into()))["action"], "decline", "an answer is not an approval");
+        assert_eq!(to_elicit("takeover", &Outcome::Yes)["content"], json!({"done": true}));
+    }
+
+    #[test]
+    fn metrics_go_to_the_log_not_the_screen() {
+        let lines = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let l2 = lines.clone();
+        let answers = Arc::new(Mutex::new(vec![Outcome::Yes, Outcome::Timeout, Outcome::Yes, Outcome::Closed, Outcome::Text("a.ods".into())]));
+        let a2 = answers.clone();
+        let popup: Popup = Arc::new(move |_, _| { std::thread::sleep(Duration::from_millis(20)); a2.lock().unwrap().remove(0) });
+        let svc = Service::new("t".into(), popup);
+        svc.set_log(Box::new(move |v| l2.lock().unwrap().push(v.clone())));
+        svc.begin_task("task-7");
+        for (i, (k, msg, meta)) in [("approve", "Delete x?", json!({})), ("approve", "Delete  x?", json!({})),
+                                    ("takeover", "Log in", json!({"steps": ["type password", "press Log in"]})),
+                                    ("help", "Stuck", json!({})), ("clarify", "Which file?", json!({}))].iter().enumerate() {
+            let line = json!({"token": "t", "id": format!("q{i}"), "kind": k, "message": msg, "timeout_s": 30, "meta": meta}).to_string();
+            svc.handle_line(&line);
+        }
+        let s = svc.end_task("finished").unwrap();
+        assert_eq!(s["asks"], 5);
+        assert_eq!(s["repeated"], 1, "the same approve question twice");
+        assert_eq!(s["takeover_steps"], 2);
+        assert_eq!((s["timed_out"].as_u64(), s["cancelled"].as_u64()), (Some(1), Some(1)));
+        assert_eq!(s["by_type"]["clarify"], 1);
+        assert!(s["person_active_s"].as_f64().unwrap() >= 0.0 && s["agent_blocked_s"].as_f64().unwrap() >= s["person_active_s"].as_f64().unwrap());
+        let l = lines.lock().unwrap();
+        assert_eq!(l.iter().filter(|v| v["ev"] == "human_q").count(), 5);
+        assert_eq!(l.last().unwrap()["ev"], "human_summary");
+        assert!(l.iter().all(|v| v["schema"] == "gui-pi-human/1" && v["task"] == "task-7"));
+        assert!(svc.end_task("again").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_reaches_the_watching_extension() {
+        use std::os::unix::net::UnixStream;
+        let path = std::env::temp_dir().join(format!("gpd-w-{}/h.sock", std::process::id()));
+        let svc = Service::new("tok".into(), Arc::new(|_, _| Outcome::Yes));
+        serve_unix(&path, svc.clone()).unwrap();
+        svc.begin_task("t1");
+        // a wrong token never becomes a watcher
+        let mut bad = UnixStream::connect(&path).unwrap();
+        bad.write_all(b"{\"token\":\"no\",\"op\":\"watch_stop\"}\n").unwrap();
+        let mut s = UnixStream::connect(&path).unwrap();
+        s.write_all(b"{\"token\":\"tok\",\"op\":\"watch_stop\",\"id\":\"stop\"}\n").unwrap();
+        let s2 = s.try_clone().unwrap();
+        let h = std::thread::spawn(move || {
+            let mut l = String::new();
+            BufReader::new(s2).read_line(&mut l).unwrap();
+            assert_eq!(l.trim(), "{\"stop\":true}");
+            let mut s = s;
+            s.write_all(b"{\"ack\":\"stopped\",\"reset\":true}\n").unwrap();
+        });
+        let t0 = Instant::now();
+        while svc.watchers.lock().unwrap().len() < 1 && t0.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(svc.watchers.lock().unwrap().len(), 1);
+        assert_eq!(svc.signal_stop(Duration::from_secs(3)), Some(true));
+        h.join().unwrap();
+        // nobody watching (or no ack in time): None, and Stop goes on (the shell kills the process tree)
+        assert_eq!(svc.signal_stop(Duration::from_millis(100)), None);
     }
 
     #[test]

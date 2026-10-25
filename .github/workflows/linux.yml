@@ -49,13 +49,20 @@ jobs:
         run: |
           feat=""; if [ "${{ inputs.test_hooks }}" = "true" ]; then feat="--features test-hooks"; fi
           npx -y @tauri-apps/cli@2 build $feat
+      - name: release checksums (every bundled file is in resources.SHA256SUMS, checked by the app at start; the packages in SHA256SUMS)
+        run: |
+          cp dist/resources/SHA256SUMS resources.SHA256SUMS
+          ( cd desktop/target/release/bundle && sha256sum appimage/*.AppImage deb/*.deb | sed 's#  [a-z]*/#  #' ) > SHA256SUMS
+          cat SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: gui-pi-desktop-linux-x86_64${{ inputs.test_hooks && '-testhooks' || '' }}
           path: |
             desktop/target/release/bundle/appimage/*.AppImage
             desktop/target/release/bundle/deb/*.deb
-            dist/resources/SHA256SUMS
+            SHA256SUMS
+            resources.SHA256SUMS
+            packaging/linux/*.sh
       - name: publish a prerelease (main pushes and manual runs), so a test box can fetch it without a login
         if: github.event_name != 'pull_request'
         env: {GH_TOKEN: "${{ github.token }}"}
@@ -64,4 +71,5 @@ jobs:
           gh release delete "$tag" -y --cleanup-tag 2>/dev/null || true
           gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "$tag" \
             --notes "CI build of ${GITHUB_SHA::7}; gui-gate ${GATE_REF::7}. ${{ inputs.test_hooks && 'TEST HOOKS ON: scripted person answers; test boxes only.' || '' }}" \
-            desktop/target/release/bundle/appimage/*.AppImage desktop/target/release/bundle/deb/*.deb dist/resources/SHA256SUMS
+            desktop/target/release/bundle/appimage/*.AppImage desktop/target/release/bundle/deb/*.deb SHA256SUMS resources.SHA256SUMS \
+            packaging/linux/appimage-update.sh packaging/linux/uninstall.sh
