@@ -25,25 +25,31 @@ export const FORBIDDEN_GATE_ARGS = ["--allow-config"];
 /** Task arguments only the user's channel sets (GUI_PI_TASK_FILE / GUI_PI_TASK). */
 export const TASK_ARGS = ["--task", "--task-file"];
 
-const isNever = (k: string) => NEVER_TO_GATE.includes(k) || k.startsWith("GUI_PI_");
+const isNever = (k: string) => { const u = k.toUpperCase(); return NEVER_TO_GATE.includes(u) || u.startsWith("GUI_PI_"); };
+/** Windows names come as the system spells them ("Path", "SystemRoot") and are case-insensitive there. */
+export function allowedName(k: string, platform: string = process.platform): boolean {
+  const named = platform === "win32" ? BASE_ENV_NAMES.some((n) => n.toUpperCase() === k.toUpperCase()) : BASE_ENV_NAMES.includes(k);
+  return named || BASE_ENV_PREFIXES.some((p) => k.startsWith(p));
+}
 
 /**
  * The gate child's environment: the allowlisted session variables from Pi's environment, the GUI_GATE_* settings
  * Pi's environment carries (plain `pi -e` runs and tests), then what the shell handed over (`fromShell`).
  */
-export function gateEnv(env: NodeJS.ProcessEnv, fromShell: Record<string, string> = {}): Record<string, string> {
+export function gateEnv(env: NodeJS.ProcessEnv, fromShell: Record<string, string> = {}, platform: string = process.platform): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined || isNever(k)) continue;
-    if (BASE_ENV_NAMES.includes(k) || BASE_ENV_PREFIXES.some((p) => k.startsWith(p)) || k.startsWith("GUI_GATE_")) out[k] = v;
+    if (allowedName(k, platform) || k.startsWith("GUI_GATE_")) out[k] = v;
   }
   for (const [k, v] of Object.entries(fromShell || {})) {
     if (typeof v !== "string" || isNever(k) || !k.startsWith("GUI_GATE_")) continue;
     out[k] = v;
   }
-  delete out.GUI_GATE_ALLOW_CONFIG;
-  delete out.GUI_GATE_TASK;
-  delete out.GUI_GATE_TASK_FILE;
+  for (const k of Object.keys(out)) {
+    const u = k.toUpperCase();
+    if (u === "GUI_GATE_ALLOW_CONFIG" || u === "GUI_GATE_TASK" || u === "GUI_GATE_TASK_FILE") delete out[k];
+  }
   out.GUI_GATE_NO_UPDATE_CHECK = "1";
   return out;
 }

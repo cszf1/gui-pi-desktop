@@ -71,7 +71,8 @@ pub fn parse_sums(text: &str) -> Vec<(String, String)> {
         let path = rest.strip_prefix("  ").or_else(|| rest.strip_prefix(" *"))?;
         let path = path.strip_prefix("./").unwrap_or(path);
         // never leave the resources directory
-        if path.is_empty() || path.starts_with('/') || path.split('/').any(|c| c == "..") {
+        // (also no Windows drive letters, backslash separators or alternate data streams)
+        if path.is_empty() || path.starts_with('/') || path.contains('\\') || path.contains(':') || path.split('/').any(|c| c == "..") {
             return None;
         }
         Some((h.to_lowercase(), path.to_string()))

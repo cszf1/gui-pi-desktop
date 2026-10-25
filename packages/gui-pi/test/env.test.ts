@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { ipcPath } from "./harness.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:net";
 import { mkdtempSync } from "node:fs";
@@ -24,7 +25,7 @@ test("--allow-config is never passed to the gate", () => {
 });
 
 test("gate settings come from the shell's IPC once, with the token", async () => {
-  const path = join(mkdtempSync(join(tmpdir(), "genv-")), "h.sock");
+  const path = ipcPath("genv");
   const seen: any[] = [];
   const srv = createServer((sock) => {
     sock.on("data", (d) => {
@@ -84,4 +85,15 @@ test("the extension never writes the task file (static check + a run)", async ()
   const argv = h.records()[0].argv;
   assert.equal(argv[argv.indexOf("--task-file") + 1], tf);
   h.api.mcp.close();
+});
+
+test("Windows: variable names are matched without case (Path, SystemRoot), secrets still never pass", () => {
+  const e = gateEnv({ Path: "C:\\Windows\\system32", SystemRoot: "C:\\Windows", windir: "C:\\Windows", Gui_Pi_Main_Key: "sk-main",
+                      gui_gate_allow_config: "1", Gui_Gate_Reviewer_Url: "https://r" }, {}, "win32");
+  assert.equal(e.Path, "C:\\Windows\\system32");
+  assert.equal(e.SystemRoot, "C:\\Windows");
+  assert.equal(e.windir, "C:\\Windows");
+  assert.ok(!Object.keys(e).some((k) => /main_key|allow_config/i.test(k)), JSON.stringify(e));
+  // on Linux "Path" is just some other variable
+  assert.equal(gateEnv({ Path: "/x" }, {}, "linux").Path, undefined);
 });

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SkillIndex, scanSkills, parseFrontmatter, stripFrontmatter } from "../src/skills.ts";
 import { load, txt } from "./harness.ts";
@@ -57,7 +57,7 @@ test("skills: valid frontmatter, platform and app skills present, system prompt 
   for (const s of list) {
     assert.match(s.name, /^[a-z0-9]+(-[a-z0-9]+)*$/);
     assert.ok(s.description.length > 20 && s.description.length <= 1024, s.name);
-    assert.equal(parseFrontmatter(readFileSync(s.filePath, "utf8")).name, s.filePath.split("/").at(-2));
+    assert.equal(parseFrontmatter(readFileSync(s.filePath, "utf8")).name, basename(dirname(s.filePath)));
   }
   const sys = readFileSync(join(ROOT, "prompts/system.md"), "utf8");
   assert.ok(sys.length < 4000, `system prompt is ${sys.length} chars`);

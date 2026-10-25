@@ -1,0 +1,123 @@
+name: windows
+# Windows x86_64: tests everything (gui-gate from GATE_REF, its fake_driver end-to-end suite, the extension, the shell
+# core incl. the Job Object Stop test), then builds the NSIS + MSI packages with node, Pi 1.4.0, the gui-pi extension,
+# gui-gate.exe and Cua Driver 0.38.0 (windows-x86_64) inside, installs the NSIS package on the runner's interactive
+# desktop, runs it (self-check, bundle integrity, screenshots; the test-hooks build shows the four person popups) and
+# publishes the CI prereleases build-<sha>-windows and build-<sha>-windows-testhooks. No model keys are used in CI.
+on:
+  push: {branches: [main, win-dev]}
+  pull_request:
+  workflow_dispatch:
+env:
+  GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # gui-gate main dafb126 (same commit in linux.yml / macos.yml)
+  PYTHON: python
+  GUI_GATE_DIALOG: none  # tests answer person requests through the client (MRTR) or --human: never a real PowerShell dialog
+permissions: {contents: write}
+jobs:
+  test:
+    runs-on: windows-latest
+    defaults: {run: {shell: bash}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: {repository: cszf1/gui-gate, ref: "${{ env.GATE_REF }}", path: gate, fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22.23.4"}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: "gate -> target\ndesktop -> target", key: windows}
+      - name: gui-gate build (static CRT, like gui-gate's own Windows release)
+        working-directory: gate
+        env: {RUSTFLAGS: "-C target-feature=+crt-static"}
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with: {name: gate-windows, path: gate/target/release/gui-gate.exe}
+      - name: gui-gate cargo tests
+        working-directory: gate
+        env: {RUSTFLAGS: "-C target-feature=+crt-static"}
+        run: cargo test --release
+      - name: gui-gate fake_driver end-to-end (every gate return action, MRTR person requests) + security / meta suites
+        working-directory: gate
+        env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
+        timeout-minutes: 40
+        run: python -u -m unittest tests.test_actions_e2e tests.test_security_e2e tests.test_mcp_meta -v
+      - name: gui-gate full python suite (informational on Windows - bash/run_command and bench tests are Linux-only; see docs/test-log.md)
+        working-directory: gate
+        continue-on-error: true
+        timeout-minutes: 60
+        env: {GUI_GATE_BIN: "target/release/gui-gate.exe", GUI_GATE_NO_UPDATE_CHECK: "1", PYTHONUTF8: "1"}
+        run: python -u -m unittest discover -s tests -v
+      - name: extension tests (incl. E2E-ext against the real gui-gate.exe + fake driver)
+        working-directory: packages/gui-pi
+        env: {GUI_GATE_BIN: "${{ github.workspace }}/gate/target/release/gui-gate.exe", GUI_GATE_SRC: "${{ github.workspace }}/gate"}
+        run: node --test test/*.test.ts
+      - name: shell core tests (Job Object Stop, env allowlist without case, self-check)
+        working-directory: desktop
+        env: {GPD_DUMP_MODELS_JSON: "${{ runner.temp }}/models.json"}
+        run: cargo test -p gpd-core
+
+  bundle:
+    needs: test
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix: {variant: [normal, testhooks]}
+    defaults: {run: {shell: bash}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: {repository: cszf1/gui-gate, ref: "${{ env.GATE_REF }}", path: gate, fetch-depth: 0}
+      - uses: actions/download-artifact@v4
+        with: {name: gate-windows, path: gate-bin}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22.23.4"}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: sigstore/cosign-installer@v3
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: "desktop -> target", key: "windows-${{ matrix.variant }}"}
+      - name: stage resources (node win-x64, Pi lock, gui-gate.exe, Cua Driver 0.38.0 windows-x86_64, all by SHA256 + Sigstore)
+        env: {REQUIRE_SIG: "1"}
+        run: scripts/stage-resources.sh "$GITHUB_WORKSPACE/gate" windows-x86_64 "$GITHUB_WORKSPACE/gate-bin/gui-gate.exe"
+      - name: the bundled Pi reads the main model key from the environment (models.json apiKey "$GUI_PI_MAIN_KEY")
+        working-directory: desktop
+        env: {GPD_DUMP_MODELS_JSON: "${{ runner.temp }}/models.json"}
+        run: |
+          cargo test -p gpd-core --lib keys_only_in_env_never_in_files_or_args -q
+          node ../scripts/check-pi-key.mjs "$RUNNER_TEMP/models.json" ../dist/resources/pi
+      - name: bundle (NSIS + MSI)
+        working-directory: desktop/src-tauri
+        run: |
+          feat=""; if [ "${{ matrix.variant }}" = "testhooks" ]; then feat="--features test-hooks"; fi
+          npx -y @tauri-apps/cli@2 build $feat
+      - name: checksums (resources.SHA256SUMS = what the app checks at start; SHA256SUMS = the packages)
+        run: |
+          cp dist/resources/SHA256SUMS resources.SHA256SUMS
+          python -c "import hashlib,glob,os; [print(hashlib.sha256(open(f,'rb').read()).hexdigest()+'  '+os.path.basename(f)) for f in sorted(glob.glob('desktop/target/release/bundle/nsis/*.exe')+glob.glob('desktop/target/release/bundle/msi/*.msi'))]" > SHA256SUMS
+          cat SHA256SUMS
+      - name: install + run on the runner's desktop (self-check, integrity, screenshots; popups in the test-hooks build), uninstall
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem desktop/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName
+          ./scripts/ci/win-smoke.ps1 -Setup $setup -Out "$env:GITHUB_WORKSPACE/smoke" -Variant "${{ matrix.variant }}" -GateSrc "$env:GITHUB_WORKSPACE/gate"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: "smoke-windows-${{ matrix.variant }}", path: smoke}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-pi-desktop-windows-x86_64${{ matrix.variant == 'testhooks' && '-testhooks' || '' }}
+          path: |
+            desktop/target/release/bundle/nsis/*.exe
+            desktop/target/release/bundle/msi/*.msi
+            SHA256SUMS
+            resources.SHA256SUMS
+      - name: publish a prerelease (main pushes and manual runs on main)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          tag="build-${GITHUB_SHA::7}-windows${{ matrix.variant == 'testhooks' && '-testhooks' || '' }}"
+          gh release delete "$tag" -y --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "$tag" \
+            --notes "CI build of ${GITHUB_SHA::7} for Windows x86_64 (unsigned); gui-gate ${GATE_REF::7}; Cua Driver 0.38.0. ${{ matrix.variant == 'testhooks' && 'TEST HOOKS ON: scripted person answers and --demo-popups; test machines only.' || '' }}" \
+            desktop/target/release/bundle/nsis/*.exe desktop/target/release/bundle/msi/*.msi SHA256SUMS resources.SHA256SUMS

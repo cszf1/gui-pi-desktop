@@ -75,7 +75,8 @@ impl Launch {
 }
 
 pub fn is_secret(k: &str) -> bool {
-    k.ends_with("_KEY") || k.contains("TOKEN")
+    let u = k.to_ascii_uppercase(); // Windows names come in any case
+    u.ends_with("_KEY") || u.contains("TOKEN")
 }
 
 /// Masks every key value the shell holds in what it logs or shows (the agent's RPC lines, stderr, UI events).
@@ -111,15 +112,27 @@ impl Redactor {
 /// The complete environment of the Pi process: the allowlisted variables of `parent` (never a GUI_GATE_*, GUI_PI_*,
 /// PI_* or other secret-looking variable of the shell's own environment), then the launch's own variables.
 pub fn child_env(parent: impl IntoIterator<Item = (String, String)>, l: &Launch) -> Vec<(String, String)> {
+    child_env_for(parent, l, cfg!(windows))
+}
+
+/// Windows spells variables as it likes ("Path", "SystemRoot", "windir") and treats names without case: there the
+/// allowlist is compared without case, or node, the gate and the driver would start without PATH.
+pub fn allowed_name(k: &str, windows: bool) -> bool {
+    let named = if windows { BASE_ENV_NAMES.iter().any(|n| n.eq_ignore_ascii_case(k)) } else { BASE_ENV_NAMES.contains(&k) };
+    named || BASE_ENV_PREFIXES.iter().any(|p| k.starts_with(p))
+}
+
+pub fn child_env_for(parent: impl IntoIterator<Item = (String, String)>, l: &Launch, windows: bool) -> Vec<(String, String)> {
+    let same = |a: &str, b: &str| if windows { a.eq_ignore_ascii_case(b) } else { a == b };
     let mut out: Vec<(String, String)> = parent.into_iter()
-        .filter(|(k, _)| BASE_ENV_NAMES.contains(&k.as_str()) || BASE_ENV_PREFIXES.iter().any(|p| k.starts_with(p)))
+        .filter(|(k, _)| allowed_name(k, windows))
         .filter(|(k, _)| !is_secret(k) && !FORBIDDEN_ENV.contains(&k.as_str()))
         .collect();
     for (k, v) in &l.env {
         if FORBIDDEN_ENV.contains(&k.as_str()) {
             continue;
         }
-        out.retain(|(x, _)| x != k);
+        out.retain(|(x, _)| !same(x, k));
         out.push((k.clone(), v.clone()));
     }
     out
@@ -260,6 +273,20 @@ fn skill_dirs(root: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn windows_variable_names_ignore_case() {
+        let l = Launch { program: "node".into(), args: vec![], env: vec![("GUI_PI_X".into(), "1".into())], gate_env: vec![], gate_env_in_pi: false, files: vec![] };
+        let parent = vec![("Path".to_string(), "C:\\Windows\\system32".to_string()), ("SystemRoot".to_string(), "C:\\Windows".to_string()),
+                          ("windir".to_string(), "C:\\Windows".to_string()), ("OpenAI_Api_Key".to_string(), "sk-x".to_string()),
+                          ("Gui_Gate_Allow_Config".to_string(), "1".to_string())];
+        let w = super::child_env_for(parent.clone(), &l, true);
+        let names: Vec<&str> = w.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(names.contains(&"Path") && names.contains(&"SystemRoot") && names.contains(&"windir"), "{names:?}");
+        assert!(!names.iter().any(|n| n.to_ascii_uppercase().contains("KEY") || n.to_ascii_uppercase().contains("ALLOW")), "{names:?}");
+        let u = super::child_env_for(parent, &l, false);
+        assert!(!u.iter().any(|(k, _)| k == "Path"), "unix names stay exact");
+    }
+
     use super::*;
     use crate::keys::MemoryStore;
     use crate::config::{ModelCfg, RoleCfg};

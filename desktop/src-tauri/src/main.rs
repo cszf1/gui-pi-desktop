@@ -115,7 +115,8 @@ fn headless() -> bool {
 fn paths(app: &AppHandle) -> Paths {
     let res = resources_dir(app);
     let exe = |n: &str| if cfg!(windows) { format!("{n}.exe") } else { n.to_string() };
-    let driver = res.join("cua-driver").join(exe("cua-driver"));
+    // macOS: Cua's signed CuaDriver.app, unmodified (its Accessibility / Screen Recording grants belong to it)
+    let driver = if cfg!(target_os = "macos") { mac_driver(&res) } else { res.join("cua-driver").join(exe("cua-driver")) };
     Paths {
         node: res.join("node").join("bin").join(exe("node")),
         pi_cli: res.join("pi").join("node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
@@ -126,6 +127,10 @@ fn paths(app: &AppHandle) -> Paths {
         driver: if driver.exists() { Some(driver) } else { None },
         data: data_dir(app),
     }
+}
+
+fn mac_driver(res: &std::path::Path) -> PathBuf {
+    res.join("CuaDriver.app").join("Contents").join("MacOS").join("cua-driver")
 }
 
 fn secrets(keys: &dyn KeyStore) -> Vec<String> {
@@ -546,7 +551,13 @@ fn stop_now(state: &AppState) {
 /// Startup: Linux self-check, bundle integrity against the shipped SHA256SUMS (a mismatch blocks Start), and - when
 /// allowed in the settings - an "update available" notice from the latest public release. Nothing is installed.
 fn startup_checks(app: &AppHandle, keychain: bool, update_check: bool) {
-    let checks = selfcheck::evaluate(&selfcheck::gather(keychain));
+    let ctx = selfcheck::Context { webview: tauri::webview_version().ok(),
+                                   mac_driver: if cfg!(target_os = "macos") { Some(mac_driver(&resources_dir(app))) } else { None } };
+    let probe = selfcheck::gather_with(keychain, &ctx);
+    if let Some(m) = &probe.mac {
+        eprintln!("[self-check] cua-driver permissions status: {}", m.raw.chars().take(600).collect::<String>());
+    }
+    let checks = selfcheck::evaluate(&probe);
     let integ = integrity::verify(&resources_dir(app));
     let mut blocked = None;
     if integ.blocks_start() {
@@ -588,6 +599,83 @@ fn self_check(app: AppHandle, state: tauri::State<AppState>) -> Value {
     state.checks.lock().unwrap().clone()
 }
 
+/// macOS: ask for CuaDriver's permissions the way Cua documents it (`cua-driver permissions grant` launches
+/// CuaDriver.app through LaunchServices, so macOS attributes the prompts to it), then the person re-checks.
+#[tauri::command]
+fn grant_permissions(app: AppHandle) -> Result<String, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("only needed on macOS".into());
+    }
+    let d = mac_driver(&resources_dir(&app));
+    std::process::Command::new(&d).args(["permissions", "grant"]).env_clear().envs(launch::system_env(std::env::vars()))
+        .spawn().map(|_| "CuaDriver asks macOS for Accessibility and Screen Recording now. Allow both for CuaDriver, then press Re-check (restart gui-pi if macOS says so).".into())
+        .map_err(|e| format!("cannot start {}: {e}", d.display()))
+}
+
+/// macOS: open System Settings at the privacy pane for `pane` ("accessibility" | "screen").
+#[tauri::command]
+fn open_privacy(pane: String) -> Result<(), String> {
+    let anchor = match pane.as_str() { "accessibility" => "Privacy_Accessibility", "screen" => "Privacy_ScreenCapture", _ => return Err("unknown pane".into()) };
+    if !cfg!(target_os = "macos") {
+        return Err("only on macOS".into());
+    }
+    std::process::Command::new("open").arg(format!("x-apple.systempreferences:com.apple.preference.security?{anchor}")).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Test builds only: show the four person popups through the real ask-a-person IPC (the same lines the extension
+/// sends), one after another, and print each reply. CI uses it to screenshot the popups on Windows and macOS.
+#[cfg(feature = "test-hooks")]
+fn demo_popups(app: &AppHandle, timeout_s: f64) {
+    use std::io::{BufRead, BufReader};
+    let Some((addr, token)) = app.state::<AppState>().ipc.lock().unwrap().clone() else { eprintln!("[demo] no IPC"); app.exit(3); return };
+    let reqs = [
+        ("approve", "Delete the file ~/Documents/lab-note.txt?", json!({"kind": "approve", "tool": "run_command", "target": "rm ~/Documents/lab-note.txt",
+            "object": "~/Documents/lab-note.txt", "scope": "this one file", "consequence": "the file is deleted (not moved to the bin)",
+            "reason": "high-risk action: deletes a file the request does not name"})),
+        ("answer", "Which button should I press?", json!({"kind": "answer", "options": [{"label": "Increment", "value": "Increment", "effect": "adds 1 to the counter"},
+            {"label": "Shuffle labels", "value": "Shuffle labels", "effect": "renames the buttons at random"}], "allow_other": true})),
+        ("takeover", "Please type the password into the Password field, then press Done.", json!({"kind": "takeover",
+            "steps": ["Click the Password field in GateLab", "Type the password", "Press Done here"], "reason": "password field"})),
+        ("ask_help", "The Save report button does nothing after two tries.", json!({"kind": "ask_help",
+            "tried": ["click Save report", "press Ctrl+S"], "reason": "two failures in a row"})),
+    ];
+    let mut all_ok = true;
+    for (i, (kind, msg, meta)) in reqs.iter().enumerate() {
+        let id = format!("demo-{}-{kind}", i + 1);
+        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        let line = json!({"token": token, "id": id, "kind": kind, "message": msg, "schema": {}, "timeout_s": timeout_s,
+                          "deadline_ms": now_ms + (timeout_s * 1000.0) as i64, "meta": meta}).to_string();
+        println!("{}", json!({"kind": "demo_ask", "type": human::type_of(kind), "gate_kind": kind, "id": id}));
+        let _ = std::io::stdout().flush();
+        let reply: Result<String, String> = (|| {
+            let mut buf = String::new();
+            if let Some(hp) = addr.strip_prefix("tcp:") {
+                let mut s = std::net::TcpStream::connect(hp).map_err(|e| e.to_string())?;
+                writeln!(s, "{line}").map_err(|e| e.to_string())?;
+                BufReader::new(s).read_line(&mut buf).map_err(|e| e.to_string())?;
+            } else {
+                #[cfg(unix)]
+                {
+                    let mut s = std::os::unix::net::UnixStream::connect(&addr).map_err(|e| e.to_string())?;
+                    writeln!(s, "{line}").map_err(|e| e.to_string())?;
+                    BufReader::new(s).read_line(&mut buf).map_err(|e| e.to_string())?;
+                }
+            }
+            Ok(buf)
+        })();
+        match reply {
+            Ok(r) => println!("{}", json!({"kind": "demo_reply", "gate_kind": kind, "reply": serde_json::from_str::<Value>(r.trim()).unwrap_or(json!(r))})),
+            Err(e) => {
+                all_ok = false;
+                println!("{}", json!({"kind": "demo_reply", "gate_kind": kind, "error": e}));
+            }
+        }
+        let _ = std::io::stdout().flush();
+        std::thread::sleep(Duration::from_millis(800));
+    }
+    app.exit(if all_ok { 0 } else { 5 });
+}
+
 #[tauri::command]
 fn open_settings(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("settings") { let _ = w.set_focus(); return Ok(()); }
@@ -610,6 +698,13 @@ fn main() {
     let argv: Vec<String> = std::env::args().collect();
     let run_task = argv.iter().position(|a| a == "--run").and_then(|i| argv.get(i + 1).cloned());
     if run_task.is_some() { std::env::set_var("GUI_PI_HEADLESS", "1"); }
+    // test builds: `--demo-popups [seconds]` (four popups through the IPC) and `--show-settings` (open the settings page)
+    #[cfg(feature = "test-hooks")]
+    let demo: Option<f64> = argv.iter().position(|a| a == "--demo-popups")
+        .map(|i| argv.get(i + 1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(20.0));
+    #[cfg(feature = "test-hooks")]
+    if demo.is_some() { std::env::set_var("GUI_PI_HEADLESS", "1"); }
+    let show_settings = cfg!(feature = "test-hooks") && argv.iter().any(|a| a == "--show-settings");
     let app = tauri::Builder::default()
         .setup(move |app| {
             let h = app.handle().clone();
@@ -632,6 +727,22 @@ fn main() {
                     *st.ipc.lock().unwrap() = Some(x);
                 }
                 Err(e) => eprintln!("ask-a-person service failed: {e} (no task can start)"),
+            }
+            if show_settings {
+                let _ = open_settings(h.clone());
+            }
+            #[cfg(feature = "test-hooks")]
+            if let Some(secs) = demo {
+                let h4 = h.clone();
+                std::thread::spawn(move || {
+                    // let the main window (and the settings page) draw and the self-check finish first
+                    for _ in 0..600 {
+                        if h4.state::<AppState>().checks.lock().unwrap().get("pending").is_none() { break; }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    std::thread::sleep(Duration::from_millis(std::env::var("GUI_PI_DEMO_LEAD_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(4000)));
+                    demo_popups(&h4, secs);
+                });
             }
             if let Some(t) = run_task.clone() {
                 let h2 = h.clone();
@@ -656,7 +767,8 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![get_settings, save_settings, set_key, use_memory_keys, test_model, popup_answer, popup_fit,
-                                                 start_task, send_message, restart_task, stop_task, open_settings, self_check])
+                                                 start_task, send_message, restart_task, stop_task, open_settings, self_check,
+                                                 grant_permissions, open_privacy])
         .build(tauri::generate_context!())
         .expect("error while building gui-pi-desktop");
     app.run(|h, event| match event {

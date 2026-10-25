@@ -98,8 +98,19 @@ function renderChecks(c) {
   if (c.integrity) box.appendChild(el("div", { className: c.integrity.ok ? (c.integrity.unverified ? "warn" : "ok") : "fail", textContent: c.integrity.message }));
   if (c.update) box.appendChild(el("div", { className: "warn", textContent: c.update }));
   if (c.blocked) box.appendChild(el("div", { className: "fail", textContent: "Start is blocked: " + c.blocked }));
+  // macOS: CuaDriver needs Accessibility and Screen Recording; the buttons ask for them the way Cua documents it
+  const perms = (c.system || []).filter((x) => (x.id === "accessibility" || x.id === "screen") && x.level !== "ok");
+  if (perms.length) {
+    const note = el("div", { className: "warn", textContent: "" });
+    const b = (label, fn) => { const x = el("button", { textContent: label }); x.onclick = async () => { try { note.textContent = (await fn()) || ""; } catch (e) { note.textContent = String(e); } }; return x; };
+    box.append(b("Grant permissions", () => invoke("grant_permissions")),
+               b("Open Accessibility settings", () => invoke("open_privacy", { pane: "accessibility" })),
+               b("Open Screen Recording settings", () => invoke("open_privacy", { pane: "screen" })), note);
+  }
 }
 document.getElementById("recheck").onclick = async () => { renderChecks(await invoke("self_check")); };
+// the startup checks finish after this page may have opened: redraw only the checks (never the form being edited)
+window.__TAURI__.event.listen("checks_done", async () => { const s = await invoke("get_settings"); if (state) state.checks = s.checks; renderChecks(s.checks || {}); });
 // redraw=false (Test connection): keep the form as it is (its values are what was just saved) and update only the
 // problem list, so a result written into the form is not thrown away.
 async function save(redraw = true) {

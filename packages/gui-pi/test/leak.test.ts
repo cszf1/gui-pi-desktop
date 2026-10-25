@@ -7,7 +7,7 @@ import { createServer } from "node:net";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { load } from "./harness.ts";
+import { load, ipcPath } from "./harness.ts";
 
 const MAIN = "sk-fake-pi-MAIN-0000111122";
 const REV = "sk-fake-gate-REVIEWER-123456";
@@ -15,7 +15,7 @@ const PLAN = "sk-fake-gate-PLANNER-654321";
 const TOKEN = "tok-secret-person-ipc-abcdef";
 
 function shellIpc() {
-  const path = join(mkdtempSync(join(tmpdir(), "leak-")), "h.sock");
+  const path = ipcPath("leak");
   const socks: any[] = [];
   const srv = createServer((s) => {
     socks.push(s);

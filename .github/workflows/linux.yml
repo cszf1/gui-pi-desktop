@@ -8,7 +8,7 @@ on:
     inputs:
       test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
 env:
-  GATE_REF: 0cae275ab859c014dab4fd94d455c883ef98300b  # gui-gate main after v0.10.1: fixes from the 0.3.0 live test (not tagged yet; 0.10.2)
+  GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # gui-gate main dafb126: 0cae275 + Windows fixes (job log names, child env case, Windows paths in dialog values) + tests never open a real dialog; not tagged
 permissions: {contents: write}
 jobs:
   build:
