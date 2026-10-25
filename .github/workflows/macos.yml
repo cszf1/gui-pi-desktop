@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 env:
   GATE_REF: dafb12653697ad44823aa634592f399363f357a9  # gui-gate main dafb126 (same commit in linux.yml / windows.yml)
+  GUI_GATE_DIALOG: none  # tests answer person requests through the client (MRTR) or --human: never a real osascript dialog
 permissions: {contents: write}
 jobs:
   test:
@@ -34,10 +35,17 @@ jobs:
           lipo -create -output ../gate-bin/gui-gate target/release/gui-gate target/x86_64-apple-darwin/release/gui-gate
           lipo -info ../gate-bin/gui-gate
           cargo test --release
-      - name: gui-gate python suite (fake_driver end-to-end: every gate return action, MRTR person requests)
+      - name: gui-gate fake_driver end-to-end (every gate return action, MRTR person requests) + security / meta suites
         working-directory: gate
         env: {GUI_GATE_BIN: "target/release/gui-gate", GUI_GATE_NO_UPDATE_CHECK: "1"}
-        run: python3 -m unittest discover -s tests
+        timeout-minutes: 30
+        run: python3 -u -m unittest tests.test_actions_e2e tests.test_security_e2e tests.test_mcp_meta -v
+      - name: gui-gate full python suite (informational on macOS - the bench harness and some bash rules assume Linux; see docs/test-log.md)
+        working-directory: gate
+        continue-on-error: true
+        timeout-minutes: 40
+        env: {GUI_GATE_BIN: "target/release/gui-gate", GUI_GATE_NO_UPDATE_CHECK: "1"}
+        run: python3 -u -m unittest discover -s tests -v
       - name: extension tests (incl. E2E-ext against the real gui-gate + fake driver)
         working-directory: packages/gui-pi
         env: {GUI_GATE_BIN: "${{ github.workspace }}/gate/target/release/gui-gate", GUI_GATE_SRC: "${{ github.workspace }}/gate"}
