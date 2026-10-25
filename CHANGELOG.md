@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.0 — 2026-10-25（对应 gui-gate v0.10.1 的新接口；兼容 v0.10.0）
+
+按外部审阅 §4（问人）、§5（agent 侧）、§7（桌面产品化）补齐剩下的桌面 / 扩展项。新 gate 接口按名字编码，缺失时退回 0.2 行为（design.md §11 列出全部假设）。
+
+### 扩展 gui-pi
+- 每次模型请求前调用客户端专用工具 `gate_next_step {window_id}`：observe=tree / tree+screenshot 时扩展自己读聚焦窗口，作为会话里的 custom message 附在下一轮前（参与 diff 链）；extra_reason 时附固定提示；decision_id 写进会话。没有该工具时试调一次后不再调。
+- blocked + `next_action: "rethink"`：告诉模型重新生成候选、不要重发；`done_by_person`（及旧门的 `gate.done_by_person`）：同一工具 + 参数在本任务内被拦下，读窗口后继续。
+- 截图：每张图有 id、原字节（JPEG q60，不缩放）存进会话目录（0600）；上下文保留每窗口最新一张 + 最多 3 张固定证据图（新工具 `pin_evidence {id, label}`，可 unpin，跨压缩保存）+ 最近一次 `recall_image {id}`。
+- 提示词卫生：系统提示词、gate 简报、skills 每条指令只写一处（有重叠检测测试）；skills 只列名字和描述，用新工具 `load_skill` 按需加载；新增 platform-linux / platform-windows / platform-macos。
+- 一份计划状态（plan.ts）：删掉 gate 每个结果末尾的 `[plan]` 行；提醒只在里程碑、压缩之后、偏航时。
+- 每个 tools/call 的 `_meta` 带 `gui_pi/usage: {input, output, cache_read}`（模型真实用量，同一消息的其余调用为 0 + same_message）。
+- 任务通道：有 `GUI_PI_TASK_FILE` 时 gate 用 `--task-file` 启动；`GUI_PI_GATE_ARGS` 里的 `--task` / `--task-file` 和 gate 环境里的 `GUI_GATE_TASK*` 一律丢弃；扩展从不写任务文件。
+- 停止：经问人 IPC 的 `watch_stop` 连接收到停止 → 拦下一切调用 → `gate_reset`（有的话）→ 杀掉 gate → 回确认。
+- 密钥擦除：扩展经手的密钥在工具结果、details、会话条目、压缩摘要、通知和日志里换成 `***`。
+- 测试：假 gate（fake_gate.mjs）+ 模拟 Pi 的端到端测试（next_step、rethink / done_by_person、截图、用量、停止、假密钥泄漏、任务文件）。
+
+### 壳（gpd-core + Tauri）
+- 可信任务通道：用户原话（开始任务和运行中每条“Send”消息）写进私有运行目录的任务文件（0600、原子替换、带版本），只能由 `UserWords` 写入；测试证明只有用户输入进文件。
+- 停止：通知扩展并等确认（最多 2 秒），然后杀掉 Pi 的整个进程组（Pi 以独立进程组启动）；假子进程测试：停止后不再有动作，新任务是新进程。
+- 问人弹窗：一个组件、四种严格结果类型 approve（对象 / 范围 / 后果）、clarify（选项及各自后果）、takeover（最少步骤、输入暂停、完成不重做）、help（已试办法、代做或给提示）；gate 的 answer / ask_help 映射到 clarify / help。
+- 问人指标：每题与每任务的询问次数、重复问题、人主动 / 等待秒数、接管步骤、取消 / 超时，写进 `logs/human.jsonl`（schema gui-pi-human/1），界面只多一行时间线。
+- Linux 启动自检：X11 / Wayland 说明、AT-SPI 总线、DBus 会话、Secret Service（否则提示仅内存）、WebKitGTK 4.1、glibc ≥ 2.35；结果在设置页，fail 阻止开始。
+- 发布卫生：启动时按包内 SHA256SUMS 校验所有组件（驱动签名原样），不符阻止开始；不自动更新，只提示新的正式版本（可关）；`appimage-update.sh`（校验后安装、保留上一版、rollback）和带守卫的 `uninstall.sh`（只删应用自己的目录，从不碰另装的 Cua Driver 和用户数据），均有测试；CI 发布 `SHA256SUMS` 与 `resources.SHA256SUMS`。
+- 日志和时间线里的密钥值一律遮蔽（`launch::Redactor`）；假密钥端到端测试：Pi 环境只有主模型密钥，gate 密钥只经一次性 IPC 交接，日志与界面无密钥。
+
+### 文档
+- design.md 0.3：指令归属表、skills 按需加载、next_step、截图存取、计划单一来源、四种问人结果与指标、可信任务通道、停止流程、坐标原点与缩放约定、平台说明表（Linux / Windows / macOS）、卸载范围、发布与更新、对新 gate 接口的假设；威胁模型改为“审核模型是一道必要的防线，但不是充分的防线”。
+
 ## 0.2.0 — 2026-10-25 (gui-gate v0.10.0)
 
 按外部审阅（桌面版、上下文、问人部分）修订。兼容当前 gui-gate（status executed / blocked / partial / done）和正在改的新 gate（diff 结构、status unknown / input_required、human_outcome、移除 gate_confirm、gate_task 不再授权）。

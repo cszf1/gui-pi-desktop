@@ -1,6 +1,6 @@
 {
   "name": "gui-pi",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Pi extension: gui-gate MCP client (2026-07-28 + MRTR), context strategy, ask-a-person bridge",
   "type": "module",
   "main": "index.ts",

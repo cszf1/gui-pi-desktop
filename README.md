@@ -4,7 +4,7 @@
 
 状态：开发中（Linux 先做）。设计见 [docs/design.md](docs/design.md)，变更见 [CHANGELOG.md](CHANGELOG.md)。
 
-安全边界：门保护的是**合作但会犯错的 agent**，不是恶意 agent；OS 级隔离是后续工作（design.md §11）。
+安全边界：门保护的是**合作但会犯错的 agent**，不是恶意 agent；OS 级隔离是后续工作（design.md §12）。
 
 ## 目录
 
@@ -17,6 +17,8 @@
 | `prompts/`、`skills/` | 系统提示词与 skills |
 | `packaging/pi` | Pi 1.4.0 的 package.json + package-lock（固定版本） |
 | `scripts/stage-resources.sh` | 布置打包资源（全部按哈希校验） |
+| `packaging/linux/appimage-update.sh` | 手动安装 / 更新 AppImage（按发布的 SHA256SUMS 校验），保留上一版，`rollback` 回滚 |
+| `packaging/linux/uninstall.sh` | 只删应用自己的目录（`--print-paths` / `--dry-run` 先看）；从不碰另装的 Cua Driver 和用户数据 |
 | `.github/workflows/linux.yml` | Linux CI：测试 + AppImage / deb |
 
 ## 测试
@@ -51,7 +53,14 @@ cd desktop/src-tauri && npx -y @tauri-apps/cli@2 build
 开发时可以不打包：`GUI_PI_RESOURCES=$PWD/dist/resources cargo run -p gui-pi-desktop`（在 `desktop/` 下）。
 无界面跑一个任务：`gui-pi-desktop --run "任务原文"`（用已保存的设置，弹窗照常显示，事件打印到 stdout）。
 
-CI（`.github/workflows/linux.yml`，ubuntu-22.04）：构建并测试固定提交的 gui-gate → 扩展测试 → `cargo test -p gpd-core` → `stage-resources.sh` → `tauri build`，上传 AppImage / deb / SHA256SUMS 为构件，并为 main 的每次推送发布一个预发布（测试机无需登录即可下载）。
+CI（`.github/workflows/linux.yml`，ubuntu-22.04）：构建并测试固定提交的 gui-gate → 扩展测试 → `cargo test -p gpd-core` → `stage-resources.sh` → `tauri build`，上传 AppImage / deb、`SHA256SUMS`（安装包）、`resources.SHA256SUMS`（包内每个组件，应用启动时校验）和两个脚本，并为 main 的每次推送发布一个预发布（测试机无需登录即可下载）。
+
+## 更新、回滚、卸载
+
+应用不自动更新，只在有新的正式版本时提示。更新：下载新 AppImage 和同一发布的 `SHA256SUMS`，运行
+`packaging/linux/appimage-update.sh install gui-pi-desktop_X_amd64.AppImage SHA256SUMS`（校验通过才安装，上一版保留为
+`~/Applications/gui-pi-desktop/gui-pi-desktop.previous.AppImage`）；出问题时 `appimage-update.sh rollback`。
+卸载：`packaging/linux/uninstall.sh --dry-run` 看清单，再不带参数运行（`--keys` 同时删钥匙串条目）。
 
 ## 密钥
 
