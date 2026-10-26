@@ -241,6 +241,10 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
 
 ---
 
+### 5.4 门代码今后在哪里演进（2026-10-26）
+
+门代码今后在桌面仓库这条线上演进：gui-gate v0.10.2 是它作为独立 MCP 的最后一版，三个工作流的 `GATE_REF` 固定指向 v0.10.2 的提交，构建时仍从 cszf1/gui-gate 拉取这个固定来源。下一步是否把 gate 源码并入本仓库（例如 `gate/` 子目录，连同它的 Rust / Python 测试和 bench）另行决定；这次不做大搬迁。
+
 ## 6. 桌面壳（Tauri 2）
 
 ### 6.1 窗口
@@ -385,7 +389,7 @@ resources/
 - **回滚**：`packaging/linux/appimage-update.sh install NEW.AppImage SHA256SUMS` 先按发布的 SHA256SUMS 校验（不在清单里或哈希不对就拒绝），再把当前版改名为 `gui-pi-desktop.previous.AppImage`、新版成为当前版；`rollback` 交换两者。设置和数据目录两版共用。有测试。
 - 依赖：AT-SPI（at-spi2-core）、webkit2gtk-4.1；.deb 声明依赖，AppImage 运行时检查并提示。
 - 布置资源：`scripts/stage-resources.sh <已构建的 gui-gate 检出目录>` 生成 `dist/resources/`（node 按 SHASUMS256 校验、Pi 按 package-lock `npm ci`、扩展/提示词/skills、gate 二进制、驱动按锁文件哈希和签名校验），最后写 SHA256SUMS。
-- CI：`.github/workflows/linux.yml`，GitHub Actions ubuntu-22.04：构建并测试固定提交的 gui-gate（`GATE_REF`）→ 扩展测试 → `cargo test -p gpd-core` → stage-resources → `tauri build`（AppImage + deb）。`.github/workflows/windows.yml`（windows-latest：gate 构建 + cargo test + fake_driver e2e / 安全 / meta 套件、扩展测试、gpd-core 测试 → NSIS + MSI → 在 runner 桌面静默安装、自检、组件校验、截图、测试钩子版四种弹窗、包内 gui-gate.exe 跑 e2e、卸载）；`.github/workflows/macos.yml`（macos-latest 构建 universal .app/.dmg 并冒烟，再在 Intel runner 上跑同一个 universal 包）。三个工作流用同一个 `GATE_REF`；main 上的推送发布预发布 `build-<sha>-{linux,windows,macos}`（及 `-testhooks`）。
+- CI：`.github/workflows/linux.yml`，GitHub Actions ubuntu-22.04：构建并测试固定提交的 gui-gate（`GATE_REF`）→ 扩展测试 → `cargo test -p gpd-core` → stage-resources → `tauri build`（AppImage + deb）。`.github/workflows/windows.yml`（windows-latest：gate 构建 + cargo test + fake_driver e2e / 安全 / meta 套件、扩展测试、gpd-core 测试 → NSIS + MSI → 在 runner 桌面静默安装、自检、组件校验、截图、测试钩子版四种弹窗、包内 gui-gate.exe 跑 e2e、卸载）；`.github/workflows/macos.yml`（macos-latest 构建 universal .app/.dmg 并冒烟，再在 Intel runner 上跑同一个 universal 包）。三个工作流用同一个 `GATE_REF`（0.3.1 起是 gui-gate v0.10.2）；main 上的推送发布预发布 `build-<sha>-{linux,windows,macos}`（及 `-testhooks`）；推 `v*` tag 时三个工作流把包加到同一个正式 release `vX.Y.Z`，测试钩子版进预发布 `vX.Y.Z-testhooks`（Linux 的测试钩子版由在该 tag 上手动运行 linux.yml 并勾选 test_hooks 产生）。
 
 ---
 
@@ -448,7 +452,7 @@ resources/
 
 ---
 
-## 11. 对新 gate 接口的假设（v0.10.1，按名字编码，缺失时退回 0.2 行为）
+## 11. 对新 gate 接口的假设（v0.10.1，按名字编码，缺失时退回 0.2 行为；v0.10.2 的变化见表后）
 
 | 接口 | 假设 | 没有时 |
 |---|---|---|
@@ -459,6 +463,8 @@ resources/
 | `--task-file <path>` | 文件变化时重读；格式见 §6.7（纯文本，带版本头） | v0.10.0 启动时读一次（同一参数，已支持） |
 | 问人 `_meta` | clarify：`options[{label,value,effect}]`、`allow_other`；help：`tried[]`；takeover：`steps[]`；approve：`object`/`scope`/`consequence`，或从 `target` + `effect{tool,hazard,resources,app,window}` 推出 | 只显示有的字段 |
 | 每次调用 `_meta["gui_pi/usage"]` | `{input, output, cache_read}`（+ 可选 `same_message`），gate 按调用记录 | gate 忽略未知 `_meta` 键 |
+
+v0.10.2（0.3.1 起打包）：ask_help 结果带 `human_choice`（`another_way` = 人让换个方法，是回答；`did_it`）；新 `human_outcome`：`task_changed`、作废（reset 后 `void`，其超时带 `voided`）、`late`、`not_asked_again`、`expired`、`channel_unavailable`，答案被拒收时 gate 回 JSON-RPC `-32602 Invalid requestState`（扩展记为 `answer_rejected`）；`tier: "write_args"`（读工具带写文件参数被拒）；`tier: "freeze"`（有人在回答，reset 之后也一样，直到回答或超时）；审核原话不再返回，`gate_report.reviewer` 只是 `configured | none`；应用文本里像 gate 行的内容被加上 `(app text) ` 前缀；gate 自己的桌面对话框默认按钮是拒绝。
 
 ## 12. 威胁模型
 

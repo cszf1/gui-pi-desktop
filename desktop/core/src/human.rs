@@ -245,6 +245,9 @@ pub fn view(req: &Request) -> Value {
         }
         _ => {}
     }
+    // the button that has the keyboard focus (Enter / Space): always the refusing / not-doing one, never Allow / Done /
+    // "I did it" (gate v0.10.2: every desktop dialog defaults to refusal)
+    v["default"] = json!("no");
     v
 }
 
@@ -663,6 +666,22 @@ pub fn auto_outcome(rules: &Value, kind: &str, counter: &Mutex<std::collections:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_popup_defaults_to_the_refusing_button() {
+        for kind in ["approve", "answer", "clarify", "takeover", "ask_help", "help"] {
+            let r = Request { kind: kind.into(), message: "m".into(), ..Default::default() };
+            let v = view(&r);
+            assert_eq!(v["default"], "no", "{kind}");
+            let b = v["buttons"].as_array().unwrap();
+            assert!(b.iter().any(|x| x["choice"] == "no"), "{kind}: the default button exists");
+            // the "no" choice never approves / never claims the step was done
+            let e = to_elicit(kind, &Outcome::No(String::new()));
+            assert_ne!(e["content"]["decision"], "allow", "{kind}");
+            assert_ne!(e["content"]["done"], true, "{kind}");
+            assert_ne!(e["content"]["choice"], "did_it", "{kind}");
+        }
+    }
+
     use super::*;
 
     #[test]

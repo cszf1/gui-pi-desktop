@@ -2,13 +2,13 @@ name: linux
 # Tests everything, then builds the Linux AppImage + .deb with node, Pi 1.4.0, the gui-pi extension, gui-gate and
 # Cua Driver 0.38.0 inside. GATE_REF pins the gui-gate commit the app ships.
 on:
-  push: {branches: [main]}
+  push: {branches: [main], tags: ["v*"]}
   pull_request:
   workflow_dispatch:
     inputs:
       test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
 env:
-  GATE_REF: 6339cf8c7b06ba33b85b4c2ececb93dd8ff5d3c2  # gui-gate main 6339cf8: 025f9ba + Windows paths (W1: C:\..., mixed separators, 8.3 short names, NTFS change time), whole python suite green on Linux/Windows/macOS (gate ci.yml); not tagged
+  GATE_REF: acaba696272bc49641e978d677bd721cb9f9ffd1  # gui-gate v0.10.2 (tag): the last standalone gui-gate release; same commit in linux.yml / windows.yml / macos.yml
 permissions: {contents: write}
 jobs:
   build:
@@ -69,12 +69,19 @@ jobs:
             resources.SHA256SUMS
             packaging/linux/*.sh
       - name: publish a prerelease (main pushes and manual runs), so a test box can fetch it without a login
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/')
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           tag="build-${GITHUB_SHA::7}${{ inputs.test_hooks && '-testhooks' || '' }}"
           gh release delete "$tag" -y --cleanup-tag 2>/dev/null || true
           gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "$tag" \
             --notes "CI build of ${GITHUB_SHA::7}; gui-gate ${GATE_REF::7}. ${{ inputs.test_hooks && 'TEST HOOKS ON: scripted person answers; test boxes only.' || '' }}" \
+            desktop/target/release/bundle/appimage/*.AppImage desktop/target/release/bundle/deb/*.deb SHA256SUMS resources.SHA256SUMS \
+            packaging/linux/appimage-update.sh packaging/linux/uninstall.sh
+      - name: version release (tag push -> vX.Y.Z; a manual run on the tag with test_hooks -> vX.Y.Z-testhooks prerelease)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          bash scripts/ci/publish-version.sh linux ${{ inputs.test_hooks && 'testhooks' || 'normal' }} \
             desktop/target/release/bundle/appimage/*.AppImage desktop/target/release/bundle/deb/*.deb SHA256SUMS resources.SHA256SUMS \
             packaging/linux/appimage-update.sh packaging/linux/uninstall.sh

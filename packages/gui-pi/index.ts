@@ -32,7 +32,7 @@ import { prune, obsKind, obsMeta, diffNote, textOf, OBSERVE_TYPE, RECALL_TOOL } 
 import { makeAskHuman } from "./src/human.ts";
 import { PersonFreeze } from "./src/freeze.ts";
 import { PlanTracker, Reminder, stripGatePlan } from "./src/plan.ts";
-import { interpret, refusedEffect, READ_TOOLS, HUMAN_LABEL } from "./src/status.ts";
+import { interpret, refusedEffect, READ_TOOLS, HUMAN_LABEL, PERSON_SAID_NO } from "./src/status.ts";
 import { TaskFacts, ENTRY_TYPE, filesOf } from "./src/facts.ts";
 import { gateArgs, gateEnv, fetchGateEnv } from "./src/env.ts";
 import { NextStepper, ClientTool, isClientOnly, NEXT_STEP_TOOL, type Focus } from "./src/nextstep.ts";
@@ -43,7 +43,7 @@ import { SkillIndex, scanSkills, SECTION as SKILL_SECTION } from "./src/skills.t
 import { watchStop } from "./src/stop.ts";
 import { ActionGuard, UnknownGuard } from "./src/guard.ts";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.3.1";
 /** Tools an old gate may still list that the agent must never call (authorisation and config are not the agent's). */
 export const HIDDEN_GATE_TOOLS = new Set(["gate_confirm", "gate_task", "gate_config"]);
 export const NOTE_FACT = "note_fact";
@@ -54,6 +54,13 @@ export const NEXT_STEP_ENTRY = "gui-pi-nextstep";
 /** Tools the extension itself adds (the shell lists them in Pi's --tools). */
 export const OWN_TOOLS = [NOTE_FACT, PIN_EVIDENCE, RECALL_TOOL, LOAD_SKILL];
 export { gateArgs, UnknownGuard, ActionGuard };
+
+/** The gate's reset / freeze result says a person is still answering one of its questions. */
+export function personStillAnswering(r: ToolResult | undefined): boolean {
+  if (!r) return false;
+  if (r.structuredContent?.gate?.tier === "freeze") return true;
+  return /A person is still answering a request from the gate|a person is answering a request from the gate right now/i.test(textItems(r));
+}
 
 /** Which window a tool call targets: "pid:window_id" when the arguments say so. */
 function argWindow(args: any, snapWin: Map<string, string>): string | undefined {
@@ -139,6 +146,9 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         const r = await clientCall(RESET_TOOL, {}, 1500);
         ok = !r.isError && (reset.state === "yes" || r.structuredContent?.reset === true);
         reset.mark(ok);
+        // gate v0.10.2: a reset voids but does not withdraw a question a person is answering (input stays frozen
+        // until they answer or it times out): say so instead of looking stuck
+        if (personStillAnswering(r)) notify("[gui-pi] waiting for your answer: a question from the gate is still open; nothing runs until you answer or it times out.", "info");
       } catch {}
     }
     mcp.kill();
@@ -230,7 +240,8 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         if (name === "set_plan") plan.update(params);
         let changed = false;
         if (st.refused) changed = facts.addRefused(refusedEffect(name, sc, text)) || changed;
-        if (st.human) changed = facts.addAnswer(`${sc?.human_outcome?.kind || name}: the person ${HUMAN_LABEL[st.human]} (${st.human === "declined" ? "refused" : "no answer"}; not done)`) || changed;
+        if (st.choice === "another_way") changed = facts.addAnswer(`${name}: the person asked to try another way (not a refusal; do not repeat this action)`) || changed;
+        else if (st.human) changed = facts.addAnswer(`${sc?.human_outcome?.kind || name}: the person ${HUMAN_LABEL[st.human]} (${PERSON_SAID_NO.has(st.human) ? "refused" : "no answer"}; not done)`) || changed;
         if (st.byPerson) changed = facts.addAnswer(`${name}: a person did this step themselves (do not repeat it)`) || changed;
         if (typeof sc.answer === "string" && sc.answer.trim()) changed = facts.addAnswer(`answered: ${sc.answer}`) || changed;
         else if (text.startsWith("[human via")) changed = facts.addAnswer(text.split("\n")[0]) || changed;
@@ -258,7 +269,7 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         return { content: secrets.content(content.length ? content : [{ type: "text", text: "(no output)" }]),
                  isError: !!r.isError,
                  details: secrets.any({ windowKey: wkey, gateError: !!r.isError, status: st.status, executed: st.executed,
-                            next_action: st.nextAction, human_outcome: st.human, steps: st.steps, obs, images: ing.ids, gate: sc.gate || null }) };
+                            next_action: st.nextAction, human_outcome: st.human, human_choice: st.choice, steps: st.steps, obs, images: ing.ids, gate: sc.gate || null }) };
       },
     });
   }

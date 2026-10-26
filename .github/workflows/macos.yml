@@ -5,11 +5,11 @@ name: macos
 # 0.38.0 (darwin-universal) inside, runs it on the runner (arm64; the x86_64 slice on an Intel runner), and publishes
 # the CI prereleases build-<sha>-macos and build-<sha>-macos-testhooks. No model keys are used in CI.
 on:
-  push: {branches: [main, mac-dev]}
+  push: {branches: [main, mac-dev], tags: ["v*"]}
   pull_request:
   workflow_dispatch:
 env:
-  GATE_REF: 6339cf8c7b06ba33b85b4c2ececb93dd8ff5d3c2  # gui-gate main 6339cf8 (same commit in linux.yml / windows.yml)
+  GATE_REF: acaba696272bc49641e978d677bd721cb9f9ffd1  # gui-gate v0.10.2 (tag): the last standalone gui-gate release; same commit in linux.yml / windows.yml / macos.yml
   GUI_GATE_DIALOG: none  # tests answer person requests through the client (MRTR) or --human: never a real osascript dialog
 permissions: {contents: write}
 jobs:
@@ -118,6 +118,11 @@ jobs:
           gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "$tag" \
             --notes "CI build of ${GITHUB_SHA::7} for macOS 13+ (universal: Apple silicon + Intel). UNSIGNED and not notarized: see docs/design.md §6.8 for how to open it past Gatekeeper. gui-gate ${GATE_REF::7}; Cua Driver 0.38.0 (Cua's signed CuaDriver.app). ${{ matrix.variant == 'testhooks' && 'TEST HOOKS ON: scripted person answers and --demo-popups; test machines only.' || '' }}" \
             desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg SHA256SUMS resources.SHA256SUMS
+      - name: "version release on a tag push - vX.Y.Z (normal) and vX.Y.Z-testhooks prerelease"
+        if: startsWith(github.ref, 'refs/tags/v')
+        env: {GH_TOKEN: "${{ github.token }}"}
+        shell: bash
+        run: bash scripts/ci/publish-version.sh macos ${{ matrix.variant }} desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg SHA256SUMS resources.SHA256SUMS
 
   intel:
     # the x86_64 slice of the universal build, on an Intel runner

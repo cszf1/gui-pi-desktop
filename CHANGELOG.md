@@ -1,8 +1,23 @@
 # Changelog
 
-## 未发布（预发布 build-<sha>；正式 0.3.1 随 gui-gate v0.10.2 一起）
+## 0.3.1 — 2026-10-26（打包 gui-gate v0.10.2；之后只开发桌面版）
 
-修 0.3.0 在 gui-pi5 实测发现的缺陷（docs/test-log.md）。打包的 gui-gate 指向 gate main 0cae275（v0.10.1 之后，未打 tag）。
+gui-gate v0.10.2 是 gui-gate 作为独立 MCP 的最后一版（三个工作流的 `GATE_REF` 都指向它）；门代码今后随本仓库演进（design.md §5.4）。
+本版只做了单元 / 脚本验证，没有真实模型、没有在线测试（docs/test-log.md）。
+
+适配 gate v0.10.2 的协议（扩展 gui-pi + 桌面壳，每项有单元测试：packages/gui-pi/test/gate0102.test.ts、gpd-core rpc / human 测试）：
+- ask_help 的 `human_choice: "another_way"`（人选“换个方法 / 给提示”）是回答而不是拒绝：不记为被拒的效果，提示模型不要重发同一动作、换一种明显不同的方法；时间线显示“person: try another way”。
+- 新 `human_outcome`：`task_changed`（回答是针对旧任务的，什么都不批准；当前任务仍需要时可重发、会再问人）、`void` / 被 reset 作废后超时、`late`（超时后才回答）、`answer_rejected`（gate 以 `Invalid requestState` 拒收答案，MRTR 客户端转成结构化的 blocked）、`not_asked_again`、`expired`、`channel_unavailable`：都不是批准，只有 declined 是“人说不”，其余显示为“没有回答，步骤未执行”。未知的新词仍按拒绝处理。
+- tier `write_args`（读工具带了写文件参数被拒）：提示模型去掉目标参数再调；时间线说明“读工具不能写文件”。
+- 冻结（tier `freeze`，包括 Stop 发出 `gate_reset` 后问题仍在人面前）：不算拒绝，状态 `waiting_person`，主窗口显示“等待你回答 / waiting for your answer”，人回答后恢复。
+- 拒绝只从结构化结果判断（`gate.decision` / `gate.tier` / `executed`），不再看审核原话（gate 不再返回；`gate_report` 只给 configured / none）；扩展里没有依赖审核模型名或原话的代码。
+- gate 把看起来像 gate 行的应用 / 网页 / 终端文本改写成 `(app text) ...`：观察标记只在行首识别（`markerAt`），伪造行不会被当成观察、不会切错上下文。
+- 弹窗：键盘默认按钮一律是拒绝 / 不做的那个（Deny、Don't answer、I won't do it、Give a hint；自由文本问题焦点在输入框）；`human::view` 给出 `default: "no"`。
+- 发布：推 `v*` tag 时三个工作流把包加到同一个正式 release `vX.Y.Z`，测试钩子版进预发布 `vX.Y.Z-testhooks`（scripts/ci/publish-version.sh；校验和文件带平台后缀 `SHA256SUMS.linux` 等）。main 推送的 `build-<sha>` 预发布照旧。
+
+### 此前未发布的修复（已在 0.3.0 之后的预发布里）
+
+修 0.3.0 在 gui-pi5 实测发现的缺陷（docs/test-log.md）。当时打包的 gui-gate 是 gate main 0cae275 / 6339cf8（未打 tag）。
 - B1：`models.json` 的 `apiKey` 改为 `"$GUI_PI_MAIN_KEY"`（Pi 1.4.0 只插值 `$NAME`，裸名字是字面密钥 → 401）；单元测试 + CI 用包内 Pi 的 resolveConfigValue 检查（scripts/check-pi-key.mjs）。
 - B2：模型调用失败（`stopReason: "error"`）在时间线显示为错误，任务结束显示“ended with an error … not done”、状态 failed；`--run` 退出码 4。
 - B3：AppImage 打包后把 resources 原样放回（linuxdeploy 给其中 ELF 加了 RUNPATH，组件校验失败、Start 被阻）：scripts/appimage-restore-resources.sh，重打 squashfs 并按 SHA256SUMS 校验。

@@ -41,7 +41,7 @@ pub fn split_records(buf: &mut String) -> Vec<String> {
 #[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct UiEvent {
     /// "tool" | "gate" | "result" | "text" | "done" | "error" | "ui_request" | "notice" | "gate_exit" | "human" |
-    /// "crashed" | "stopped"
+    /// "crashed" | "stopped" | "waiting" (a person question from the gate is open)
     pub kind: String,
     pub text: String,
     /// a screenshot the tool returned (base64), for the thumbnail
@@ -84,9 +84,21 @@ fn human_word(h: &str) -> &'static str {
         "closed" => "window closed",
         "unavailable" => "unavailable",
         "expired" => "expired",
+        // gate v0.10.2
+        "late" => "answered too late",
+        "void" => "question voided by a reset",
+        "task_changed" => "task changed meanwhile",
+        "answer_rejected" => "answer not accepted",
+        "not_asked_again" => "not asked again",
         _ => "not done",
     }
 }
+
+/// The marker the extension writes when a reset left a person question open (gate v0.10.2: a reset voids it but input
+/// stays frozen until the person answers or it times out).
+pub const WAITING_MARK: &str = "[gui-pi] waiting for your answer";
+/// What the main window shows while a gate question waits for the person (instead of looking stuck).
+pub const WAITING_TEXT: &str = "等待你回答 - waiting for your answer: a question from the safety gate is open; nothing runs until you answer or it times out.";
 
 /// One Pi event -> what the main window shows (None: not shown).
 pub fn ui_event(line: &str) -> Option<UiEvent> {
@@ -122,16 +134,28 @@ pub fn ui_event(line: &str) -> Option<UiEvent> {
                 }
                 _ => {}
             }
-            if let Some(h) = &human {
+            let choice = d.get("human_choice").and_then(|s| s.as_str()).unwrap_or("");
+            let tier = d.pointer("/gate/tier").and_then(|s| s.as_str()).unwrap_or("");
+            if status.as_deref() == Some("waiting_person") || tier == "freeze" {
+                // a person is answering a gate question (also after a reset): say so, do not look stuck
+                return Some(UiEvent { kind: "waiting".into(), text: WAITING_TEXT.into(), status: Some("waiting_person".into()), ..Default::default() });
+            }
+            if choice == "another_way" {
+                shown = format!("person: try another way - the agent will not repeat this step. {shown}");
+            } else if let Some(h) = &human {
                 // gate no_answer semantics: only "declined" is the person saying no; a timeout, a closed or cancelled
                 // question is no answer - not a refusal, but the step is still not done
                 shown = if h == "declined" {
                     format!("person: declined - the step was not done. {shown}")
+                } else if h == "task_changed" {
+                    format!("person: answered about the older task (you wrote again) - that answer approves nothing; the step was not done. {shown}")
                 } else {
                     format!("person: no answer ({}) - not a refusal; the step was not done. {shown}", human_word(h))
                 };
+            } else if tier == "write_args" {
+                shown = format!("gate: a read tool may not write files (destination argument refused); nothing was sent. {shown}");
             }
-            Some(UiEvent { kind: if gate_kind { "gate".into() } else { "result".into() }, text: shown, image: first_image(c), status, human, ..Default::default() })
+            Some(UiEvent { kind: if gate_kind || tier == "write_args" { "gate".into() } else { "result".into() }, text: shown, image: first_image(c), status, human, ..Default::default() })
         }
         "message_end" => {
             let m = v.get("message")?;
@@ -163,6 +187,9 @@ pub fn ui_event(line: &str) -> Option<UiEvent> {
             if method == "notify" {
                 if msg.starts_with(GATE_EXIT_MARK) {
                     return ev("gate_exit", msg, None);
+                }
+                if msg.starts_with(WAITING_MARK) {
+                    return Some(UiEvent { kind: "waiting".into(), text: WAITING_TEXT.into(), status: Some("waiting_person".into()), ..Default::default() });
                 }
                 return ev("notice", msg, None);
             }
@@ -223,6 +250,32 @@ mod tests {
         assert!(e.text.starts_with("batch stopped after 2 of 5 steps"));
         let e = ui_event(r#"{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"Clicked"}],"details":{"status":"executed"}}}"#).unwrap();
         assert_eq!(e.kind, "result");
+    }
+
+    /// gate v0.10.2: human_choice another_way, the new outcome words, write_args, and the freeze (also after a reset)
+    /// shown as "waiting for your answer" instead of a stuck run.
+    #[test]
+    fn gate_0102_outcomes_and_waiting() {
+        let ev = |d: &str| ui_event(&format!(r#"{{"type":"tool_execution_end","toolName":"click","result":{{"content":[{{"type":"text","text":"[gate] Not executed: x"}}],"details":{d}}}}}"#)).unwrap();
+        let e = ev(r#"{"status":"blocked","human_outcome":null,"human_choice":"another_way"}"#);
+        assert!(e.text.starts_with("person: try another way"), "{}", e.text);
+        assert!(!e.text.contains("declined"));
+        for (h, w) in [("late", "answered too late"), ("void", "voided by a reset"), ("answer_rejected", "answer not accepted"),
+                       ("not_asked_again", "not asked again"), ("expired", "expired")] {
+            let e = ev(&format!(r#"{{"status":"blocked","human_outcome":"{h}"}}"#));
+            assert!(e.text.contains(w) && e.text.contains("not a refusal"), "{h}: {}", e.text);
+        }
+        let e = ev(r#"{"status":"blocked","human_outcome":"task_changed"}"#);
+        assert!(e.text.contains("older task") && e.text.contains("approves nothing"), "{}", e.text);
+        let e = ev(r#"{"status":"blocked","gate":{"tier":"write_args","decision":"deny","executed":false}}"#);
+        assert!(e.kind == "gate" && e.text.contains("may not write files"), "{}", e.text);
+        for d in [r#"{"status":"waiting_person"}"#, r#"{"status":"blocked","gate":{"tier":"freeze","decision":"deny","executed":false}}"#] {
+            let e = ev(d);
+            assert_eq!(e.kind, "waiting");
+            assert!(e.text.starts_with("等待你回答"), "{}", e.text);
+        }
+        let n = ui_event(r#"{"type":"extension_ui_request","id":"u9","method":"notify","message":"[gui-pi] waiting for your answer: a question from the gate is still open","notifyType":"info"}"#).unwrap();
+        assert_eq!(n.kind, "waiting");
     }
 
     #[test]

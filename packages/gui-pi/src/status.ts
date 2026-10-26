@@ -1,9 +1,13 @@
 // Reading the gate's structured result (structuredContent) into what the model must be told.
 // Works with the current gate (status executed | blocked | partial | done, batch.executed) and the newer one
-// (status unknown | input_required, human_outcome, diff). The status decides, never the "[gate]" text prefix.
+// (status unknown | input_required, human_outcome, diff) and gate v0.10.2 (human_choice, human_outcome task_changed /
+// late / void / not_asked_again / expired, tier write_args and freeze; the reviewer's words are never returned). The status decides, never the "[gate]" text prefix.
 // Nothing here retries anything: an unknown outcome is reported, and the model must re-read before acting.
 
-export type HumanOutcome = "declined" | "cancelled" | "timed_out" | "closed" | "unavailable";
+export type HumanOutcome =
+  | "declined" | "cancelled" | "timed_out" | "closed" | "unavailable"
+  // gate v0.10.2
+  | "expired" | "late" | "void" | "task_changed" | "answer_rejected" | "not_asked_again";
 
 export const HUMAN_LABEL: Record<HumanOutcome, string> = {
   declined: "declined",
@@ -11,10 +15,23 @@ export const HUMAN_LABEL: Record<HumanOutcome, string> = {
   timed_out: "did not answer in time",
   closed: "closed the question window",
   unavailable: "could not be reached (no person available)",
+  expired: "never saw the question (it expired while another question was open)",
+  late: "answered too late (after the question had timed out)",
+  void: "was asked a question that was voided (the agent was reset); their answer approves nothing",
+  task_changed: "answered about an older version of the task (you wrote again meanwhile); that answer approves nothing now",
+  answer_rejected: "answered a question that was no longer open (voided or timed out); the answer approves nothing",
+  not_asked_again: "was already asked about this exact step without answering; they are not asked again in this task",
 };
+
+/** Outcomes where the person said no. Everything else in HumanOutcome is "no (usable) answer": not a refusal by the
+ *  person, but the step was not done either. */
+export const PERSON_SAID_NO = new Set<HumanOutcome>(["declined"]);
 
 /** Tools that only read: allowed after an unknown outcome (they are how the model re-checks). */
 export const READ_TOOLS = new Set(["get_window_state", "list_windows", "list_apps", "inspect", "check_done", "set_plan", "gate_report"]);
+
+/** The gate's ask_help result: what the person chose (gate v0.10.2 `human_choice`). */
+export type HumanChoice = "another_way" | "did_it" | null;
 
 export type Interp = {
   status: string;
@@ -25,30 +42,49 @@ export type Interp = {
   /** true: it ran; false: nothing ran; "unknown": may or may not have run */
   executed: boolean | "unknown";
   human: HumanOutcome | null;
+  /** ask_help: the person asked for another way (not a refusal) or did the step */
+  choice: HumanChoice;
+  /** a person is answering a gate question right now (gate freeze): nothing was sent, wait for them */
+  waitingPerson: boolean;
   refused: boolean;
   steps: { ran: number; total: number | null } | null;
   /** client notes appended to the result for the model */
   notes: string[];
 };
 
-function normHuman(v: any): HumanOutcome | null {
+function normHuman(v: any, voided = false): HumanOutcome | null {
   if (v === null || v === undefined || v === false) return null;
+  if (typeof v === "object" && v.voided === true) voided = true;
+  const late = typeof v === "object" && v.late === true;
   const s = String(typeof v === "object" ? v.outcome ?? v.reason ?? v.action ?? v.status ?? "" : v).toLowerCase();
   if (!s || s === "accept" || s === "accepted" || s === "allow" || s === "done") return null;
+  if (s === "task_changed") return "task_changed";
+  if (s === "void" || s === "voided") return "void";
+  if (s === "answer_rejected" || s === "rejected") return "answer_rejected";
+  if (s === "not_asked_again") return "not_asked_again";
+  if (s === "late") return "late";
+  if (s === "expired") return "expired";
   if (s.startsWith("declin") || s === "deny" || s === "denied" || s === "no") return "declined";
   if (s.startsWith("cancel")) return "cancelled";
-  if (s.startsWith("time") || s === "expired" || s === "no_response") return "timed_out";
+  if (s.startsWith("time") || s === "no_response") return voided ? "void" : late ? "late" : "timed_out";
   if (s.includes("clos")) return "closed"; // gate: window_closed
   if (s.includes("unavail") || s === "unattended" || s === "none" || s === "nobody") return "unavailable"; // gate: channel_unavailable, unattended
-  return "declined";
+  return "declined"; // anything unknown fails closed
 }
 
 /** The person's outcome: structuredContent.human_outcome (new gate), else the legacy text. */
 export function humanOutcome(sc: any, text: string): HumanOutcome | null {
-  const h = normHuman(sc?.human_outcome);
+  const h = normHuman(sc?.human_outcome, sc?.voided === true || sc?.gate?.voided === true);
   if (h) return h;
   if (/did not answer within|no answer in time/i.test(text)) return "timed_out";
   if (/the person declined|person said no/i.test(text)) return "declined";
+  return null;
+}
+
+export function humanChoice(sc: any): HumanChoice {
+  const c = String(sc?.human_choice ?? "").toLowerCase();
+  if (c === "another_way" || c === "try_other" || c === "hint") return "another_way";
+  if (c === "did_it") return "did_it";
   return null;
 }
 
@@ -64,6 +100,9 @@ export function interpret(name: string, params: any, r: { content?: any[]; isErr
   const status = byPerson ? "done_by_person" : String(sc.status || (r.isError ? "blocked" : "executed"));
   const nextAction = sc.next_action ? String(sc.next_action) : null;
   const human = humanOutcome(sc, text);
+  const choice = humanChoice(sc);
+  // gate freeze: a person is answering a gate question (also after a reset, until they answer or it times out)
+  const waitingPerson = sc?.gate?.tier === "freeze";
   const notes: string[] = [];
   // done_by_person: the AGENT's step did not run (a person did the work); it must never be sent again
   const executed: boolean | "unknown" =
@@ -91,14 +130,34 @@ export function interpret(name: string, params: any, r: { content?: any[]; isErr
     notes.push("[client: the gate asks you to RETHINK: nothing was executed. Do not resend this step or a reworded copy of it. " +
       "Look at the current window, reconsider what the user asked, and generate a new next action.]");
   }
-  if (human) {
-    notes.push((human === "declined"
+  if (waitingPerson) {
+    notes.push("[client: WAITING FOR THE PERSON: they are answering a question from the gate right now. Nothing was sent. " +
+      "Do not resend this or any other action; wait for their answer, then read the window.]");
+  }
+  if (sc?.gate?.tier === "write_args") {
+    notes.push("[client: a read tool cannot write files. Nothing was sent. Call it again WITHOUT the destination argument " +
+      "(screenshot_out_file, output_path, save_to, ...); to save something use the app itself or run_command.]");
+  }
+  if (choice === "another_way") {
+    notes.push("[client: the person asked you to TRY ANOTHER WAY (this is not a refusal). Do not send the same action again; " +
+      "use a clearly different way (another menu path, a keyboard shortcut, another element); a hint they gave is in the gate's text above.]");
+  } else if (human === "task_changed") {
+    notes.push("[client: the user's task changed while the person was answering; that answer approves nothing now. " +
+      "Re-read the window and the current task; send the step again only if the current task still needs it (the person is asked again).]");
+  } else if (human) {
+    notes.push((PERSON_SAID_NO.has(human)
       ? `[client: the person declined. That is a no: the step was NOT done. `
       : `[client: the person ${HUMAN_LABEL[human]}. No answer is not a refusal by the person, but the step was NOT done. `) +
       "Do not ask again for the same thing right away and do not try the same effect another way; take a safe way or stop and report.]");
   }
-  const refused = (status === "blocked" || status === "input_required") && (!!human || /refus|declin|reviewer|risk|denied/i.test(text));
-  return { status, nextAction, byPerson, executed, human, refused, steps, notes };
+  // structured first (gate.decision / tier); the text only for old gates without a structured gate result. Never the
+  // reviewer's words: the gate no longer returns them.
+  const g = sc?.gate;
+  const gateRefusal = g && g.executed === false
+    && (["deny", "ask_human", "handoff", "stop_loop", "ask_help"].includes(String(g.decision)) || ["review", "write_args"].includes(String(g.tier)));
+  const refused = (status === "blocked" || status === "input_required") && !waitingPerson && choice !== "another_way" &&
+    (!!human || !!gateRefusal || (!g && /refus|declin|risk|denied/i.test(text)));
+  return { status: waitingPerson ? "waiting_person" : status, nextAction, byPerson, executed, human, choice, waitingPerson, refused, steps, notes };
 }
 
 /** A short description of a refused effect, for the task facts (structured when the gate gives one). */

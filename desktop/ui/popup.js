@@ -28,12 +28,12 @@ const send = (choice, t) => {
   document.querySelectorAll("button").forEach((b) => (b.disabled = true));
   invoke("popup_answer", { choice, text: t ?? null });
 };
-const button = (label, cls, fn, parent = btns) => { const b = el("button", cls, label); b.onclick = fn; parent.appendChild(b); return b; };
+const button = (label, cls, fn, parent = btns, choice) => { const b = el("button", cls, label); b.onclick = fn; if (choice) b.dataset.choice = choice; parent.appendChild(b); return b; };
 
 if (v.type === "approve") {
   fact("What", v.object); fact("Scope", v.scope); fact("If you allow", v.consequence); fact("Why the gate asks", v.reason);
-  button("Deny", "", () => send("no"));
-  button("Allow", "primary", () => send("yes"));
+  button("Deny", "", () => send("no"), btns, "no");
+  button("Allow", "primary", () => send("yes"), btns, "yes");
 } else if (v.type === "clarify") {
   const opts = v.options || [];
   if (opts.length) {
@@ -49,20 +49,27 @@ if (v.type === "approve") {
   if (v.free_text !== false) {
     text.style.display = "block"; text.placeholder = opts.length ? "Or type another answer" : "Your answer"; text.focus();
     text.onkeydown = (e) => { if (e.key === "Enter" && text.value.trim()) send("text", text.value); };
-    button("Don't answer", "", () => send("no"));
-    button("Send", "primary", () => text.value.trim() && send("text", text.value));
-  } else button("Don't answer", "", () => send("no"));
+    button("Don't answer", "", () => send("no"), btns, "no");
+    button("Send", "primary", () => text.value.trim() && send("text", text.value), btns, "text");
+  } else button("Don't answer", "", () => send("no"), btns, "no");
 } else if (v.type === "takeover") {
   list("Please do this yourself:", v.steps);
   facts.appendChild(el("div", "muted", `${v.paused || ""} ${v.note || ""}`));
-  button("I won't do it", "", () => send("no"));
-  button("Done", "primary", () => send("yes"));
+  button("I won't do it", "", () => send("no"), btns, "no");
+  button("Done", "primary", () => send("yes"), btns, "yes");
 } else {
   list("What the agent tried:", v.tried);
   fact("Why it is stuck", v.reason);
   text.style.display = "block"; text.placeholder = "A hint for the agent";
-  button("Give a hint", "", () => send("no", text.value));
-  button("I did it for you", "primary", () => send("yes"));
+  button("Give a hint", "", () => send("no", text.value), btns, "no");
+  button("I did it for you", "primary", () => send("yes"), btns, "yes");
+}
+// the keyboard default (Enter / Space) is the refusing / not-doing button (view.default = "no"), never Allow / Done;
+// a free-text question keeps the focus in its text box (Enter sends only a typed answer)
+const defaultChoice = v.default || "no";
+if (text.style.display !== "block") {
+  const d = [...btns.querySelectorAll("button")].find((b) => b.dataset.choice === defaultChoice);
+  if (d) d.focus();
 }
 // what happens when nobody answers (gate: no_answer). Not a refusal by the person; the step is still not done.
 const NO_ANSWER = {

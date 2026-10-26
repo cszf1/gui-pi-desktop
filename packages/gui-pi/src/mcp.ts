@@ -182,7 +182,15 @@ export class McpClient {
         return { content: [{ type: "text", text: `[gui-pi] no result from gui-gate (${String(e?.message || e).slice(0, 300)}). ` +
                  "The outcome of this step is unknown." }], isError: true, structuredContent: { status: "unknown", gate_lost: true } };
       }
-      if (m.error) return { content: [{ type: "text", text: `[gui-pi] gui-gate error ${m.error.code}: ${m.error.message}` }], isError: true };
+      if (m.error) {
+        // gate v0.10.2: the person's answer came back for a request that is no longer open (voided by a reset, a wrong
+        // or answer-less retry, or timed out): it approves nothing and nothing ran
+        if (round > 0 && m.error.code === -32602 && /requestState/i.test(String(m.error.message || "")))
+          return { content: [{ type: "text", text: `[gui-pi] the person's answer was not accepted by the gate (${String(m.error.message).slice(0, 200)}). ` +
+                   "Nothing was executed; read the window and decide again." }],
+                   isError: true, structuredContent: { status: "blocked", human_outcome: "answer_rejected", gate: { executed: false } } };
+        return { content: [{ type: "text", text: `[gui-pi] gui-gate error ${m.error.code}: ${m.error.message}` }], isError: true };
+      }
       const r = m.result || {};
       if (r.resultType !== "input_required") return r;
       const responses: Record<string, ElicitResult> = {};

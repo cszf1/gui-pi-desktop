@@ -19,6 +19,17 @@
 // Observations whose window is unknown fall back to "newest one stays full".
 
 export const MARKERS = ["[gate] Window right after the action", "[gate] Window now (nothing was executed)"];
+
+/** Where a gate marker starts a line (the gate's own text). gate v0.10.2 prefixes app / page / terminal text that
+ *  starts like a gate line with "(app text) ", so a marker in the middle of a line is never the gate's. -1 if none. */
+export function markerAt(text: string, k: string): number {
+  let i = text.indexOf(k);
+  while (i >= 0) {
+    if (i === 0 || text[i - 1] === "\n") return i;
+    i = text.indexOf(k, i + 1);
+  }
+  return -1;
+}
 /** Custom message the extension attaches before a turn (gate_next_step): a window read like a tool result's. */
 export const OBSERVE_TYPE = "gui-pi-observe";
 export const RECALL_TOOL = "recall_image";
@@ -41,7 +52,7 @@ export function hasImage(m: Msg): boolean {
 /** What a tool result observed, from the gate's structured diff when present, else from its text. */
 export function obsMeta(name: string, text: string, sc: any = {}): ObsMeta | null {
   const isRead = String(name || "").endsWith("get_window_state");
-  const mi = MARKERS.map((k) => text.indexOf(k)).filter((i) => i >= 0);
+  const mi = MARKERS.map((k) => markerAt(text, k)).filter((i) => i >= 0);
   const hasMarker = mi.length > 0;
   const diff = sc && typeof sc.diff === "object" && sc.diff ? sc.diff : null;
   if (!isRead && !hasMarker && !diff) return null;
@@ -125,7 +136,7 @@ export function diffNote(diff: any): string {
 
 function pruneText(text: string, name?: string): string {
   for (const k of MARKERS) {
-    const i = text.indexOf(k);
+    const i = markerAt(text, k);
     if (i >= 0) {
       const head = text.slice(0, i).trimEnd();
       return (head.length > HEAD_KEEP ? head.slice(0, HEAD_KEEP) + " ..." : head) + (head ? "\n" : "") + summary(text.slice(i));

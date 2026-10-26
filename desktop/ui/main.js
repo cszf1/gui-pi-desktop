@@ -63,11 +63,14 @@ listen("agent", (e) => {
   }
   if (ev.kind === "gate_exit") { add("error", "The safety gate stopped: " + ev.text + "\nNo GUI action can run until the task is restarted."); return; }
   if (ev.kind === "ui_request") return;
+  // a gate question waits for the person (also after a reset): show it, do not look stuck
+  if (ev.kind === "waiting") { $("status").textContent = "等待你回答 / waiting for your answer"; add("human", ev.text); return; }
   add(ev.status === "unknown" ? "gate unknown" : ev.kind, ev.text, ev.image);
 });
 // every person question ends in the timeline with its outcome; anything but a yes / an answer is a refusal
 listen("human", (e) => {
   const p = e.payload;
+  if ($("status").textContent.startsWith("等待你回答")) $("status").textContent = "running";
   const noAnswer = ["timed out", "expired", "window closed", "cancelled", "unavailable"].includes(p.outcome);
   const why = p.outcome === "expired" ? " (never shown: another question was open)" : "";
   add("human" + (noAnswer ? " muted" : p.refused ? " refused" : ""), `asked the person (${p.kind}): ${noAnswer ? "no answer (" + p.outcome + ")" : p.outcome}${why}${noAnswer ? " - not a refusal; the step was not done" : p.refused ? " - the step was not done" : ""}`);

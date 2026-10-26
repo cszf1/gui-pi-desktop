@@ -1416,7 +1416,7 @@ dependencies = [
 
 [[package]]
 name = "gpd-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "libc",
  "serde",
@@ -1479,7 +1479,7 @@ dependencies = [
 
 [[package]]
 name = "gui-pi-desktop"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "gpd-core",
  "keyring",

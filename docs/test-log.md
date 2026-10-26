@@ -278,3 +278,12 @@ gate ci.yml [run 40236851630](https://github.com/cszf1/gui-gate/actions/runs/402
 - Windows IPC 仍是 `127.0.0.1` + token（命名管道未做，M5）。
 - Linux CI 不截图；本次 Linux 弹窗截图来自一次性的临时工作流，没有进入 linux.yml。
 - R1（gate `jobs::tests::no_orphans_no_logs` 偶发）已在 gate 5aece68 修（每个 job 日志名唯一），本轮三平台未再出现。
+
+## 2026-10-26 0.3.1（gui-gate v0.10.2）：只做单元 / 脚本验证
+
+| 项 | 结果 | 验证方式 | 证据 | 日期 |
+|---|---|---|---|---|
+| 扩展适配 gate v0.10.2（human_choice another_way、task_changed / void / late / answer_rejected / not_asked_again / expired、write_args、freeze 等待、`(app text)` 伪造行、拒绝只看结构化结果）+ 全部扩展测试 | 过 | 单元 | `node --test test/*.test.ts`：66/66（新增 test/gate0102.test.ts 8 个） | 2026-10-26 |
+| 壳：时间线新词 / 等待你回答 / write_args（rpc）、四种弹窗默认按钮为拒绝（human::view）+ 全部 core 测试 | 过 | 单元 | `cargo test -p gpd-core`：62 + 3（新增 2 个） | 2026-10-26 |
+| 打包的 gui-gate v0.10.2：cargo test + 按 ci.yml 环境变量逐文件跑 python 套件 | 过 | 单元 + 脚本(fake_driver) | cargo 166 过 / 7 忽略；python 19 个文件 342 个测试 OK（skipped 1） | 2026-10-26 |
+| 真实模型 / 在线任务 | — | 未测（按用户要求本版不做） | — | — |
