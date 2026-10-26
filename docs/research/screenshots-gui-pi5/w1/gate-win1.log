@@ -1,0 +1,622 @@
+Current runner version: '2.338.0'
+##[group]Runner Image Provisioner
+Hosted Compute Agent
+Version: 20261021.618
+Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+Build Date: 2026-10-21T00:45:21Z
+Worker ID: {d461e158-f64e-4b51-9efa-8877b6f78243}
+Region: westus2
+Cloud: Azure
+##[endgroup]
+##[group]Operating System
+Microsoft Windows Server 2025
+10.0.26100
+Datacenter
+##[endgroup]
+##[group]Runner Image
+Image: windows-2025-vs2026
+Version: 20261021.278.1
+Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md
+Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20261021.278
+##[endgroup]
+##[group]GITHUB_TOKEN Permissions
+Contents: read
+Metadata: read
+Packages: read
+##[endgroup]
+Secret source: Actions
+Cache mode: write
+Prepare workflow directory
+Prepare all required actions
+Getting action download info
+Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+Download action repository 'Swatinem/rust-cache@v2' (SHA:d1527c8f67ef9af357290475d4af4b0fab8f12e0)
+Complete job name: test (windows-latest)
+##[group]Run actions/checkout@v4
+with:
+  repository: cszf1/gui-gate
+  token: ***
+  ssh-strict: true
+  ssh-user: git
+  persist-credentials: true
+  clean: true
+  sparse-checkout-cone-mode: true
+  fetch-depth: 1
+  fetch-tags: false
+  show-progress: true
+  lfs: false
+  submodules: false
+  set-safe-directory: true
+  allow-unsafe-pr-checkout: false
+env:
+  GUI_GATE_DIALOG: none
+  GUI_GATE_NO_UPDATE_CHECK: 1
+  PYTHONUTF8: 1
+##[endgroup]
+Syncing repository: cszf1/gui-gate
+##[group]Getting Git version info
+Working directory is 'D:\a\gui-gate\gui-gate'
+[command]"C:\Program Files\Git\bin\git.exe" version
+git version 2.56.0.windows.2
+##[endgroup]
+Temporarily overriding HOME='D:\a\_temp\597bb1af-0d3c-417a-97d2-5b7feb54e0ea' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+[command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\gui-gate\gui-gate
+Deleting the contents of 'D:\a\gui-gate\gui-gate'
+##[group]Initializing the repository
+[command]"C:\Program Files\Git\bin\git.exe" init D:\a\gui-gate\gui-gate
+Initialized empty Git repository in D:/a/gui-gate/gui-gate/.git/
+[command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/cszf1/gui-gate
+##[endgroup]
+##[group]Disabling automatic garbage collection
+[command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+##[endgroup]
+##[group]Setting up auth
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+[command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+##[endgroup]
+##[group]Fetching the repository
+[command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +0c7f98c9525212757146255c632fa6a2d5a964de:refs/remotes/origin/fix-win-paths
+From https://github.com/cszf1/gui-gate
+ * [new ref]         0c7f98c9525212757146255c632fa6a2d5a964de -> origin/fix-win-paths
+##[endgroup]
+##[group]Determining the checkout info
+##[endgroup]
+[command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+[command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+##[group]Checking out the ref
+[command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B fix-win-paths refs/remotes/origin/fix-win-paths
+Updating files:  32% (2375/7204)
+Updating files:  33% (2378/7204)
+Updating files:  34% (2450/7204)
+Updating files:  35% (2522/7204)
+Updating files:  36% (2594/7204)
+Updating files:  37% (2666/7204)
+Updating files:  38% (2738/7204)
+Updating files:  39% (2810/7204)
+Updating files:  40% (2882/7204)
+Updating files:  41% (2954/7204)
+Updating files:  42% (3026/7204)
+Updating files:  43% (3098/7204)
+Updating files:  44% (3170/7204)
+Updating files:  45% (3242/7204)
+Updating files:  46% (3314/7204)
+Updating files:  47% (3386/7204)
+Updating files:  48% (3458/7204)
+Updating files:  49% (3530/7204)
+Updating files:  50% (3602/7204)
+Updating files:  51% (3675/7204)
+Updating files:  52% (3747/7204)
+Updating files:  53% (3819/7204)
+Updating files:  54% (3891/7204)
+Updating files:  55% (3963/7204)
+Updating files:  56% (4035/7204)
+Updating files:  57% (4107/7204)
+Updating files:  57% (4140/7204)
+Updating files:  58% (4179/7204)
+Updating files:  59% (4251/7204)
+Updating files:  60% (4323/7204)
+Updating files:  61% (4395/7204)
+Updating files:  62% (4467/7204)
+Updating files:  63% (4539/7204)
+Updating files:  64% (4611/7204)
+Updating files:  65% (4683/7204)
+Updating files:  66% (4755/7204)
+Updating files:  67% (4827/7204)
+Updating files:  68% (4899/7204)
+Updating files:  69% (4971/7204)
+Updating files:  70% (5043/7204)
+Updating files:  71% (5115/7204)
+Updating files:  72% (5187/7204)
+Updating files:  73% (5259/7204)
+Updating files:  74% (5331/7204)
+Updating files:  75% (5403/7204)
+Updating files:  76% (5476/7204)
+Updating files:  77% (5548/7204)
+Updating files:  78% (5620/7204)
+Updating files:  79% (5692/7204)
+Updating files:  80% (5764/7204)
+Updating files:  81% (5836/7204)
+Updating files:  82% (5908/7204)
+Updating files:  83% (5980/7204)
+Updating files:  84% (6052/7204)
+Updating files:  85% (6124/7204)
+Updating files:  86% (6196/7204)
+Updating files:  87% (6268/7204)
+Updating files:  88% (6340/7204)
+Updating files:  89% (6412/7204)
+Updating files:  90% (6484/7204)
+Updating files:  91% (6556/7204)
+Updating files:  92% (6628/7204)
+Updating files:  93% (6700/7204)
+Updating files:  94% (6772/7204)
+Updating files:  95% (6844/7204)
+Updating files:  96% (6916/7204)
+Updating files:  97% (6988/7204)
+Updating files:  98% (7060/7204)
+Updating files:  99% (7132/7204)
+Updating files: 100% (7204/7204)
+Updating files: 100% (7204/7204), done.
+Switched to a new branch 'fix-win-paths'
+branch 'fix-win-paths' set up to track 'origin/fix-win-paths'.
+##[endgroup]
+[command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+0c7f98c9525212757146255c632fa6a2d5a964de
+##[group]Run actions/setup-node@v4
+with:
+  node-version: 22
+  always-auth: false
+  check-latest: false
+  token: ***
+env:
+  GUI_GATE_DIALOG: none
+  GUI_GATE_NO_UPDATE_CHECK: 1
+  PYTHONUTF8: 1
+##[endgroup]
+Found in cache @ C:\hostedtoolcache\windows\node\22.23.4\x64
+(node:7232) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+##[group]Environment details
+node: v22.23.4
+npm: 10.9.9
+yarn: 1.22.22
+##[endgroup]
+##[group]Run actions/setup-python@v5
+with:
+  python-version: 3.12
+  check-latest: false
+  token: ***
+  update-environment: true
+  allow-prereleases: false
+  freethreaded: false
+env:
+  GUI_GATE_DIALOG: none
+  GUI_GATE_NO_UPDATE_CHECK: 1
+  PYTHONUTF8: 1
+##[endgroup]
+##[group]Installed versions
+(node:2516) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Successfully set up CPython (3.12.10)
+##[endgroup]
+##[group]Run Swatinem/rust-cache@v2
+with:
+  prefix-key: v0-rust
+  add-job-id-key: true
+  add-rust-environment-hash-key: true
+  cache-targets: true
+  cache-all-crates: false
+  cache-workspace-crates: false
+  save-if: true
+  cache-provider: github
+  cache-bin: true
+  lookup-only: false
+  cmd-format: {0}
+env:
+  GUI_GATE_DIALOG: none
+  GUI_GATE_NO_UPDATE_CHECK: 1
+  PYTHONUTF8: 1
+  pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+  Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+##[endgroup]
+##[group]Cache Configuration
+Cache Provider:
+    github
+Workspaces:
+    D:\a\gui-gate\gui-gate
+Cache Paths:
+    C:\Users\runneradmin\.cargo\bin
+    C:\Users\runneradmin\.cargo\.crates.toml
+    C:\Users\runneradmin\.cargo\.crates2.json
+    C:\Users\runneradmin\.cargo\registry
+    C:\Users\runneradmin\.cargo\git
+    D:\a\gui-gate\gui-gate\target
+Restore Key:
+    v0-rust-test-Windows_NT-x64-15d0a0c1
+Cache Key:
+    v0-rust-test-Windows_NT-x64-15d0a0c1-8a5a69ab
+.. Prefix:
+  - v0-rust-test-Windows_NT-x64
+.. Environment considered:
+  - Rust Versions:
+    - 1.99.1 x86_64-pc-windows-msvc 58cf8f9c35b355199727627d07ae34a4e2846d67
+  - CARGO_INCREMENTAL
+.. Lockfiles considered:
+  - D:\a\gui-gate\gui-gate\Cargo.lock
+  - D:\a\gui-gate\gui-gate\Cargo.toml
+##[endgroup]
+
+... Restoring cache ...
+No cache found.
+##[group]Run cargo test --release
+[36;1mcargo test --release[0m
+shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+env:
+  GUI_GATE_DIALOG: none
+  GUI_GATE_NO_UPDATE_CHECK: 1
+  PYTHONUTF8: 1
+  pythonLocation: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  PKG_CONFIG_PATH: C:\hostedtoolcache\windows\Python\3.12.10\x64/lib/pkgconfig
+  Python_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python2_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  Python3_ROOT_DIR: C:\hostedtoolcache\windows\Python\3.12.10\x64
+  CACHE_ON_FAILURE: false
+  CARGO_INCREMENTAL: 0
+##[endgroup]
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded adler2 v2.0.1
+  Downloaded autocfg v1.5.1
+  Downloaded bytemuck v1.25.2
+  Downloaded byteorder-lite v0.1.0
+  Downloaded bitflags v2.13.2
+  Downloaded icu_normalizer_data v2.3.0
+  Downloaded base64 v0.22.1
+  Downloaded icu_collections v2.3.0
+  Downloaded icu_locale_core v2.3.0
+  Downloaded hashbrown v0.17.1
+  Downloaded icu_properties_data v2.3.0
+  Downloaded aho-corasick v1.1.5
+  Downloaded zune-jpeg v0.5.15
+  Downloaded zerovec-derive v0.11.6
+  Downloaded icu_normalizer v2.3.0
+  Downloaded glob v0.3.4
+  Downloaded percent-encoding v2.3.2
+  Downloaded zerovec v0.11.8
+  Downloaded moxcms v0.8.1
+  Downloaded zmij v1.0.23
+  Downloaded png v0.18.1
+  Downloaded foldhash v0.2.0
+  Downloaded quote v1.0.47
+  Downloaded utf8_iter v1.0.4
+  Downloaded cfg-if v1.0.5
+  Downloaded webpki-roots v0.26.11
+  Downloaded form_urlencoded v1.2.2
+  Downloaded smallvec v1.16.3
+  Downloaded serde v1.0.229
+  Downloaded zune-core v0.5.3
+  Downloaded getrandom v0.2.17
+  Downloaded indexmap v2.14.2
+  Downloaded flate2 v1.1.10
+  Downloaded itoa v1.0.18
+  Downloaded num-traits v0.2.19
+  Downloaded stable_deref_trait v1.2.1
+  Downloaded writeable v0.6.4
+  Downloaded zeroize v1.9.1
+  Downloaded zerotrie v0.2.5
+  Downloaded icu_provider v2.3.1
+  Downloaded idna_adapter v1.2.2
+  Downloaded zerofrom v0.1.8
+  Downloaded tinystr v0.8.4
+  Downloaded icu_properties v2.3.0
+  Downloaded miniz_oxide v0.9.1
+  Downloaded shlex v2.0.1
+  Downloaded find-msvc-tools v0.1.15
+  Downloaded potential_utf v0.1.6
+  Downloaded zerofrom-derive v0.1.8
+  Downloaded crc32fast v1.5.3
+  Downloaded litemap v0.8.3
+  Downloaded regex-syntax v0.8.11
+  Downloaded subtle v2.6.1
+  Downloaded equivalent v1.0.3
+  Downloaded yoke-derive v0.8.4
+  Downloaded untrusted v0.9.0
+  Downloaded synstructure v0.14.0
+  Downloaded once_cell v1.21.4
+  Downloaded yoke v0.8.3
+  Downloaded displaydoc v0.2.7
+  Downloaded fdeflate v0.3.7
+  Downloaded log v0.4.34
+  Downloaded unicode-ident v1.0.27
+  Downloaded simd-adler32 v0.3.10
+  Downloaded webpki-roots v1.0.10
+  Downloaded rustls-pki-types v1.15.1
+  Downloaded serde_core v1.0.229
+  Downloaded zlib-rs v0.6.8
+  Downloaded miniz_oxide v0.8.9
+  Downloaded proc-macro2 v1.0.107
+  Downloaded url v2.5.8
+  Downloaded rustls-webpki v0.103.16
+  Downloaded syn v3.0.9
+  Downloaded memchr v2.8.3
+  Downloaded ureq v2.12.1
+  Downloaded cc v1.9.0
+  Downloaded regex v1.13.1
+  Downloaded serde_json v1.0.154
+  Downloaded idna v1.1.0
+  Downloaded image v0.25.10
+  Downloaded rustls v0.23.46
+  Downloaded regex-automata v0.4.18
+  Downloaded pxfm v0.1.30
+  Downloaded ring v0.17.14
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling stable_deref_trait v1.2.1
+   Compiling cfg-if v1.0.5
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling writeable v0.6.4
+   Compiling litemap v0.8.3
+   Compiling cc v1.9.0
+   Compiling icu_normalizer_data v2.3.0
+   Compiling utf8_iter v1.0.4
+   Compiling icu_properties_data v2.3.0
+   Compiling zeroize v1.9.1
+   Compiling simd-adler32 v0.3.10
+   Compiling rustls-pki-types v1.15.1
+   Compiling ring v0.17.14
+   Compiling autocfg v1.5.1
+   Compiling syn v3.0.9
+   Compiling smallvec v1.16.3
+   Compiling adler2 v2.0.1
+   Compiling memchr v2.8.3
+   Compiling crc32fast v1.5.3
+   Compiling serde_core v1.0.229
+   Compiling num-traits v0.2.19
+   Compiling getrandom v0.2.17
+   Compiling untrusted v0.9.0
+   Compiling zmij v1.0.23
+   Compiling synstructure v0.14.0
+   Compiling miniz_oxide v0.9.1
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling zerovec-derive v0.11.6
+   Compiling zerofrom v0.1.8
+   Compiling displaydoc v0.2.7
+   Compiling yoke v0.8.3
+   Compiling equivalent v1.0.3
+   Compiling rustls v0.23.46
+   Compiling percent-encoding v2.3.2
+   Compiling zerovec v0.11.8
+   Compiling zerotrie v0.2.5
+   Compiling hashbrown v0.17.1
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.154
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling indexmap v2.14.2
+   Compiling icu_locale_core v2.3.0
+   Compiling icu_collections v2.3.0
+   Compiling form_urlencoded v1.2.2
+   Compiling flate2 v1.1.10
+   Compiling icu_provider v2.3.1
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling rustls-webpki v0.103.16
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling aho-corasick v1.1.5
+   Compiling miniz_oxide v0.8.9
+   Compiling webpki-roots v1.0.10
+   Compiling fdeflate v0.3.7
+   Compiling log v0.4.34
+   Compiling pxfm v0.1.30
+   Compiling zune-core v0.5.3
+   Compiling bitflags v2.13.2
+   Compiling subtle v2.6.1
+   Compiling itoa v1.0.18
+   Compiling foldhash v0.2.0
+   Compiling regex-syntax v0.8.11
+   Compiling once_cell v1.21.4
+   Compiling regex-automata v0.4.18
+   Compiling moxcms v0.8.1
+   Compiling png v0.18.1
+   Compiling zune-jpeg v0.5.15
+   Compiling webpki-roots v0.26.11
+   Compiling url v2.5.8
+   Compiling byteorder-lite v0.1.0
+   Compiling bytemuck v1.25.2
+   Compiling base64 v0.22.1
+   Compiling image v0.25.10
+   Compiling ureq v2.12.1
+   Compiling regex v1.13.1
+   Compiling glob v0.3.4
+   Compiling gui-gate v0.10.1 (D:\a\gui-gate\gui-gate)
+    Finished `release` profile [optimized] target(s) in 3m 06s
+     Running unittests src\main.rs (target\release\deps\gui_gate-7f935a8b330dd379.exe)
+
+running 132 tests
+test atspi::tests::a1_names ... ok
+test atspi::tests::encode_decode_roundtrip ... ok
+test atspi::tests::decode_reply_with_structs_and_dict ... ok
+test atspi::tests::grid_rendering ... ok
+test atspi::tests::terminal_tail_lines ... ok
+test authz::tests::a_file_name_alone_covers_only_the_file_in_the_working_directory ... FAILED
+test authz::tests::negated_wording_does_not_authorize ... ok
+test authz::tests::moving_existing_data_needs_the_words ... ok
+test cleanup::tests::backup_equal_but_for_gate ... ok
+test cleanup::tests::mcp_entries ... ok
+test cleanup::tests::profile_lines ... ok
+test cleanup::tests::toml_block ... ok
+test cleanup::tests::windows_path_entries ... ok
+test command::tests::command_audit ... ignored
+test authz::tests::same_effect_across_routes ... ok
+test authz::tests::wording_without_a_matchable_target_is_not_enough ... FAILED
+test decide::tests::a_fresh_read_clears_staleness ... ok
+test authz::tests::working_document_and_wording ... ok
+test decide::tests::doubtful_step_goes_to_the_reviewer_never_back_to_the_agent ... ok
+test decide::tests::failing_commit_costs_more_than_scrolling ... ok
+test decide::tests::normal_step_goes_direct ... ok
+test command::tests::same_rules_as_a_typed_terminal_command ... ok
+test decide::tests::one_failure_grows_the_fail_cost_linearly ... ok
+test decide::tests::settled_menu_click_after_wait_and_check_goes_direct ... ok
+test decide::tests::stuck_run_asks_a_person_only_when_one_is_reachable ... ok
+test decide::tests::repeated_arrow_keys_are_not_a_loop ... ok
+test done::tests::unsaved_markers ... ok
+test effect::tests::digests_differ ... ok
+test effect::tests::gui_controls_are_per_app ... ok
+test effect::tests::same_effect_through_another_tool_or_route ... ok
+test effect::tests::same_name_in_another_folder_is_another_effect ... ok
+test features::tests::menu_openers_are_not_risky ... ok
+test done::tests::paths_from_task_text ... ok
+test features::tests::save_button_over_existing_export ... ok
+test human::tests::an_answer_about_another_effect_is_not_reused ... ok
+test features::tests::yes_in_replace_dialog_is_high ... ok
+test human::tests::deny_channel_answers_at_once ... ok
+test human::tests::late_answer_is_a_timeout ... ok
+test human::tests::native_dialog_programs ... ok
+test human::tests::mrtr_parks_one_time_bound_requests ... ok
+test human::tests::only_positive_accepted_forms_count ... ok
+test human::tests::outcomes_say_why_a_request_ended ... ok
+test inspect::tests::rank_and_snap ... ok
+test command::tests::heredoc_bodies_and_interpreter_code ... ok
+test inspect::tests::crop_zoom_png ... ok
+test inspect::tests::ws_frame_roundtrip ... ok
+test loopbreak::tests::a_confirmed_step_repeated_on_purpose_is_progress ... ok
+test inspect::tests::skills_parse_and_select ... ok
+test loopbreak::tests::level_three_mentions_the_exits ... ok
+test loopbreak::tests::loop_replay ... ignored
+test loopbreak::tests::loop_replay_097 ... ignored
+test loopbreak::tests::levels_rise_and_reset ... ok
+test loopbreak::tests::two_strikes_and_recurring_states ... ok
+test loopbreak::tests::working_varied_steps_never_fire ... ok
+test memory::tests::lookup_ranks_similar_tasks ... ok
+test done::tests::evidence_for_paths ... ok
+test memory::tests::steps_from_a_gate_log ... ok
+test proc::env_case_tests::windows_names_ignore_case ... ok
+test proc::env_tests::child_env_is_an_allowlist ... ok
+test reviewer::tests::keyboard_steps_are_judged_on_usefulness_only ... ok
+test reviewer::tests::protocols_and_endpoints ... ok
+test reviewer::tests::parse_fenced ... ok
+test reviewer::tests::reviewer_env_file ... ok
+test roles::tests::first_json_extracts_objects ... ok
+test roles::tests::planner_search_compact_are_off_unless_enabled ... ok
+test plancheck::tests::predicates ... ok
+test server::tests::diffsim ... ignored
+test server::tests::clarify_options_and_safety_rule ... ok
+test server::tests::list_apps_noise_is_hidden ... ok
+test server::tests::mcp_2026_07_28_meta_rules ... ok
+test server::tests::nearest_and_opener ... ok
+test roles::tests::readonly_probe_allowlist ... ok
+test server::tests::occlusion_and_window_rows ... ok
+test server::tests::partial_advice ... ok
+test server::tests::plan_progress_line ... ok
+test server::tests::short_cuts_at_sentence ... ok
+test server::tests::stall_hints ... ok
+test server::tests::structured_diff_rebuilds_the_tree ... ok
+test server::tests::task_file_format_of_the_desktop_client ... ok
+test server::tests::text_only_rewrites_screenshot_advice ... ok
+test server::tests::tree_delta_rows ... ok
+test server::tests::tree_extra_helpers ... ok
+test server::tests::typed_commit ... ok
+test server::tests::occlusion_parse_and_parent_menu ... ok
+test shot::tests::cfg_parsing_and_clamp ... ok
+test shot::tests::result_rewritten_and_bad_data_passed_through ... ok
+test shot::tests::timing ... ignored
+test sidefx::tests::chmod_rules ... ok
+test sidefx::tests::cp_into_dir_with_existing_file ... ok
+test sidefx::tests::macos_process_table_and_cwd_parsing ... ok
+test sidefx::tests::overwrite_dialog_rules ... ok
+test sidefx::tests::redirect_overwrite ... ok
+test shot::tests::png_becomes_smaller_valid_jpeg_same_size ... ok
+test sidefx::tests::rm_of_session_scratch_is_not_user_data ... ok
+test sidefx::tests::sidefx_audit ... ignored
+test sidefx::tests::tokenizer_like_shlex ... ok
+test sidefx::tests::windows_absolute_paths ... ok
+test sidefx::win_path_tests::windows_absolute_paths ... ok
+test sidefx::win_path_tests::windows_cwd_and_short_names ... ok
+test sidefx::win_path_tests::windows_paths_normalize_on_every_os ... ok
+test sidefx::tests::rm_rules ... ok
+test state::tests::elements_only_read_keeps_rows_in_text ... ok
+test state::tests::rows_parse ... ok
+test state::tests::screenshot_only_read_counts_as_observation ... ok
+test updates::tests::baked ... ok
+test updates::tests::missing ... ok
+test updates::tests::notes ... ok
+test updates::tests::version_order ... ok
+test util::crypto_tests::redaction ... ok
+test util::crypto_tests::sha256_and_hmac_vectors ... ok
+test v097::tests::phantom_names_are_normalised_and_mapped ... ok
+test v097::tests::phantom_replay ... ignored
+test value::tests::check_is_valued_as_information ... ok
+test value::tests::fixed_policies_change_only_the_value_choice ... ok
+test value::tests::interval_crossing_zero_prefers_the_cheaper_option_on_low_risk_steps ... ok
+test value::tests::legacy_is_unchanged_by_default ... ok
+test value::tests::measured_costs_replace_the_prior_when_there_are_enough ... ok
+test value::tests::model_json_roundtrip ... ok
+test value::tests::negative_gain_is_kept_and_direct_wins ... ok
+test value::tests::positive_interaction_picks_the_option ... ok
+test value::tests::treatment_is_default_only_when_its_weights_are_loaded ... ok
+test value::tests::uncovered_options_are_never_chosen ... ok
+test valuetrain::tests::groups_from_paths ... ok
+test sidefx::win_path_tests::windows_rename_changes_the_change_time ... ok
+test valuetrain::tests::metrics_and_intervals ... ok
+test valuetrain::tests::no_answer_is_never_a_training_label ... ok
+test valuetrain::tests::rows_carry_the_option_taken_and_interventions_get_the_next_outcome ... ok
+test valuetrain::tests::splits_keep_runs_and_families_apart ... ok
+test valuetrain::tests::ipw_and_model_variants_on_a_confounded_policy ... ok
+test server::tests::final_dispatch_check_needs_a_one_shot_permit ... ok
+test inspect::tests::read_files ... ok
+test valuetrain::tests::treatment_fit_recovers_a_negative_and_a_positive_effect ... ok
+
+failures:
+
+---- authz::tests::a_file_name_alone_covers_only_the_file_in_the_working_directory stdout ----
+
+thread 'authz::tests::a_file_name_alone_covers_only_the_file_in_the_working_directory' (5776) panicked at src\authz.rs:403:9:
+the one in the working directory
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- authz::tests::wording_without_a_matchable_target_is_not_enough stdout ----
+
+thread 'authz::tests::wording_without_a_matchable_target_is_not_enough' (8000) panicked at src\authz.rs:394:9:
+assertion failed: auth("`rm` deletes report.txt", "delete /tmp/w/a/report.txt",
+    &["/tmp/w/a/report.txt"])
+
+
+failures:
+    authz::tests::a_file_name_alone_covers_only_the_file_in_the_working_directory
+    authz::tests::wording_without_a_matchable_target_is_not_enough
+
+test result: FAILED. 123 passed; 2 failed; 7 ignored; 0 measured; 0 filtered out; finished in 1.14s
+
+error: test failed, to rerun pass `--bin gui-gate`
+##[error]Process completed with exit code 101.
+Post job cleanup.
+[command]"C:\Program Files\Git\bin\git.exe" version
+git version 2.56.0.windows.2
+Temporarily overriding HOME='D:\a\_temp\68876ef0-d373-43d7-a56d-b38d4eb2e879' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+[command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\gui-gate\gui-gate
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+http.https://github.com/.extraheader
+[command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+[command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+[command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+Cleaning up orphan processes
+Terminate orphan process: pid (5584) (vctip)
+##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

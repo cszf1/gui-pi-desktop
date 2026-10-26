@@ -1,0 +1,48 @@
+D:\a\gui-pi-desktop\gui-pi-desktop\gate\tests\test_actions_e2e.py:478: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='cp1252'>
+  c = Modern("--policy", pol, person=Person(approve=DENY))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+D:\a\gui-pi-desktop\gui-pi-desktop\gate\tests\test_actions_e2e.py:478: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='cp1252'>
+  c = Modern("--policy", pol, person=Person(approve=DENY))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\unittest\case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='cp1252'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.s.............D:\a\gui-pi-desktop\gui-pi-desktop\gate\tests\test_actions_e2e.py:344: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='cp1252'>
+  c = Modern(person=p)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\unittest\case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='cp1252'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+......C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\unittest\case.py:589: ResourceWarning: unclosed <socket.socket fd=560, family=2, type=1, proto=0, laddr=('127.0.0.1', 65037)>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\unittest\case.py:589: ResourceWarning: unclosed <socket.socket fd=672, family=2, type=1, proto=0, laddr=('127.0.0.1', 65039)>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.D:\a\gui-pi-desktop\gui-pi-desktop\gate\tests\test_actions_e2e.py:218: ResourceWarning: unclosed <socket.socket fd=708, family=2, type=1, proto=0, laddr=('127.0.0.1', 65046)>
+  rev = _Rev(decision)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+D:\a\gui-pi-desktop\gui-pi-desktop\gate\tests\test_actions_e2e.py:219: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='cp1252'>
+  c = Modern("--task", "draft a reply to Bob", reviewer_url=rev.url)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\unittest\case.py:589: ResourceWarning: unclosed <socket.socket fd=668, family=2, type=1, proto=0, laddr=('127.0.0.1', 65048)>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.D:\a\gui-pi-desktop\gui-pi-desktop\gate\tests\test_actions_e2e.py:156: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='cp1252'>
+  self.c = Modern("--no-auto-observe")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\unittest\suite.py:107: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='cp1252'>
+  for index, test in enumerate(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\unittest\suite.py:107: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='cp1252'>
+  for index, test in enumerate(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...[gui-gate] driver restarted
+.C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\unittest\suite.py:84: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='cp1252'>
+  return self.run(*args, **kwds)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+----------------------------------------------------------------------
+Ran 30 tests in 58.328s
+
+OK (skipped=1)

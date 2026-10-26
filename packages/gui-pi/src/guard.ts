@@ -2,6 +2,8 @@
 //   - after an outcome-unknown result, actions wait until the model has read a window again;
 //   - after a step a PERSON did (status done_by_person), the same step (tool + arguments) is never sent again in
 //     this task, and actions wait for a read unless the result already carried a fresh one;
+//   - a step the gate held in its unknown ledger (gate v0.10.3 `unknown_hold`: it may already have happened and must not
+//     happen twice) is never sent again in this task either;
 //   - after the user pressed Stop, nothing runs at all.
 import { READ_TOOLS } from "./status.ts";
 
@@ -19,9 +21,12 @@ export class ActionGuard {
   pending: "" | "unknown" | "person" = "";
   /** steps a person did: never resent */
   byPerson = new Set<string>();
+  /** steps the gate held as possibly done (unknown_hold): never resent */
+  held = new Set<string>();
   stopped = false;
 
-  onResult(tool: string, status: string, isError: boolean, args?: any, freshRead = false) {
+  onResult(tool: string, status: string, isError: boolean, args?: any, freshRead = false, hold: string | null = null) {
+    if (hold === "unknown_hold") this.held.add(signature(tool, args));
     if (status === "unknown") this.pending = "unknown";
     else if (status === "done_by_person") {
       this.byPerson.add(signature(tool, args));
@@ -39,6 +44,8 @@ export class ActionGuard {
     if (!gateTools.has(tool)) return null;
     if (this.byPerson.has(signature(tool, args)))
       return "Held: a person already did exactly this step. Never send it again; read the window and continue from what it shows.";
+    if (this.held.has(signature(tool, args)))
+      return "Held: this step may already have happened (its earlier outcome is unknown and it must not happen twice). Do not send it again; report it to the user as possibly done.";
     if (!this.pending || READ_TOOLS.has(tool)) return null;
     return this.pending === "unknown"
       ? "Held: the outcome of an earlier step is unknown. Read the window first (get_window_state) and decide from what it shows; do not resend that step blind."

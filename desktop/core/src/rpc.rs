@@ -115,6 +115,16 @@ pub fn platform_word(p: &str) -> &'static str {
     }
 }
 
+/// A gate v0.10.3 hold (unknown ledger / approval premise / review), in the timeline's words.
+pub fn hold_word(h: &str) -> Option<&'static str> {
+    match h {
+        "premise" => Some("gate: what the person approved changed before it was sent (recipient, amount, text or a file) - that approval is void and nothing was sent; a re-send asks the person again."),
+        "unknown_hold" => Some("gate: held - this step may already have happened (its outcome is unknown and it must not happen twice); it is not sent again - please check it yourself."),
+        "review_unavailable" => Some("gate: the step needed a review, the reviewer did not answer and nobody could be asked - nothing was sent."),
+        _ => None,
+    }
+}
+
 /// One Pi event -> what the main window shows (None: not shown).
 pub fn ui_event(line: &str) -> Option<UiEvent> {
     let v: Value = serde_json::from_str(line).ok()?;
@@ -174,6 +184,17 @@ pub fn ui_event(line: &str) -> Option<UiEvent> {
                 };
             } else if tier == "write_args" {
                 shown = format!("gate: a read tool may not write files (destination argument refused); nothing was sent. {shown}");
+            }
+            // gate v0.10.3 holds (the extension's details.hold, else the gate's own tier / decision)
+            let decision = d.pointer("/gate/decision").and_then(|s| s.as_str()).unwrap_or("");
+            let hold = d.get("hold").and_then(|s| s.as_str()).unwrap_or(match (tier, decision) {
+                ("premise", _) => "premise",
+                (_, "unknown_hold") => "unknown_hold",
+                (_, "review_unavailable") => "review_unavailable",
+                _ => "",
+            });
+            if let Some(w) = hold_word(hold) {
+                shown = format!("{w} {shown}");
             }
             if let Some(p) = d.get("platform").and_then(|x| x.as_str()) {
                 shown = format!("{} {shown}", platform_word(p));
@@ -280,6 +301,22 @@ mod tests {
         assert!(e.text.starts_with("batch stopped after 2 of 5 steps"));
         let e = ui_event(r#"{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"Clicked"}],"details":{"status":"executed"}}}"#).unwrap();
         assert_eq!(e.kind, "result");
+    }
+
+    /// gate v0.10.3 holds: premise changed, unknown_hold, review_unavailable - from the extension's details.hold or the
+    /// gate's own structured result
+    #[test]
+    fn gate_0103_holds_in_the_timeline() {
+        let ev = |d: &str| ui_event(&format!(r#"{{"type":"tool_execution_end","toolName":"click","result":{{"content":[{{"type":"text","text":"[gate] Not executed: x"}}],"details":{d}}}}}"#)).unwrap();
+        let e = ev(r#"{"status":"blocked","gate":{"decision":"deny","tier":"premise","executed":false}}"#);
+        assert!(e.text.contains("approved changed") && e.text.contains("asks the person again"), "{}", e.text);
+        assert_eq!(e.kind, "gate");
+        let e = ev(r#"{"status":"blocked","hold":"unknown_hold","gate":{"decision":"unknown_hold","tier":"rule","executed":false}}"#);
+        assert!(e.text.contains("may already have happened") && e.text.contains("not sent again"), "{}", e.text);
+        let e = ev(r#"{"status":"blocked","gate":{"decision":"review_unavailable","tier":"rule","executed":false}}"#);
+        assert!(e.text.contains("nothing was sent") && e.text.contains("review"), "{}", e.text);
+        let e = ev(r#"{"status":"done"}"#);
+        assert!(!e.text.contains("gate:"), "{}", e.text);
     }
 
     /// gate v0.10.2: human_choice another_way, the new outcome words, write_args, and the freeze (also after a reset)

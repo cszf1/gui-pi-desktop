@@ -1,0 +1,1 @@
+installed: C:\Users\runneradmin\AppData\Local\gui-pi-desktop\gui-pi-desktop.exe

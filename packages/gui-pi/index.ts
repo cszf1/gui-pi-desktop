@@ -45,7 +45,7 @@ import { PlanTracker, Reminder, stripGatePlan } from "./src/plan.ts";
 import { interpret, refusedEffect, READ_TOOLS, HUMAN_LABEL, PERSON_SAID_NO } from "./src/status.ts";
 import { TaskFacts, ENTRY_TYPE, filesOf } from "./src/facts.ts";
 import { Progress, PROGRESS_ENTRY, postconditions } from "./src/progress.ts";
-import { ObsTracker, FRESH_MS } from "./src/observe.ts";
+import { ObsTracker, FRESH_MS, rereadOf, afterPerson } from "./src/observe.ts";
 import { LatencyBook } from "./src/latency.ts";
 import { PlatformHealth, CONSTRAINT as PLATFORM_CONSTRAINT } from "./src/platform.ts";
 import { GG } from "./src/mcp.ts";
@@ -242,7 +242,7 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
     const f = focusOf(focusKey);
     const anchor = f ? obsT.anchorReason(focusKey) : null;
     const a = await nextStep.before(f, { fresh: (shot) => obsT.isFresh(focusKey, shot), anchor,
-                                         listWindows: !!anchor && anchor.startsWith("a person") });
+                                         listWindows: !!anchor && obsT.wantsList(focusKey) });
     if (!a || !a.content.length) return null;
     let details: any = { decision_id: a.decision.decision_id, observe: a.decision.observe, extra_reason: a.decision.extra_reason,
                          ...(a.anchor ? { anchor: a.anchor } : {}) };
@@ -308,7 +308,7 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         const { wkey, obs } = learnWindow(name, params, sc, text);
 
         const st = interpret(name, params, r);
-        guard.onResult(name, st.status, !!r.isError, params, !!obs);
+        guard.onResult(name, st.status, !!r.isError, params, !!obs, st.hold);
         const isAction = gateTools.has(name) && !READ_TOOLS.has(name) && name !== "request_human";
         const nImages = (r.content || []).filter((c: any) => c?.type === "image").length;
         // one freshness judgement: an observation in any result counts; an action without one makes its window stale
@@ -317,7 +317,13 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         if (st.status === "unknown") obsT.force(wkey || focusKey, "an earlier outcome is unknown");
         // a person acted: re-read the affected state (the window and the window list) before the next turn; the
         // original action is never replayed
-        if (st.byPerson) obsT.force(wkey || focusKey, "a person acted (takeover / did it themselves)");
+        // gate v0.10.3 re-reads after a person's turn itself (reread + a fresh read in the result): read only what it did not
+        const rr = st.byPerson ? rereadOf(sc) : null;
+        if (st.byPerson) {
+          const tw = Number(params?.window_id);
+          const ap = afterPerson(rr, !!obs, Number.isInteger(tw) ? tw : null);
+          if (ap.force) obsT.force(wkey || focusKey, ap.why, ap.listWindows);
+        }
         const pnote = platform.onResult(name, text, !!r.isError, st.status, st.byPerson);
         const before = plan.counts();
         if (name === "set_plan") plan.update(params);
@@ -329,6 +335,7 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         if (typeof sc.answer === "string" && sc.answer.trim()) changed = facts.addAnswer(`answered: ${sc.answer}`) || changed;
         else if (text.startsWith("[human via")) changed = facts.addAnswer(text.split("\n")[0]) || changed;
         for (const f of filesOf(sc)) changed = facts.addFile(f) || changed;
+        if (rr) for (const f of rr.files) changed = facts.addFile(f) || changed; // files changed during the person's turn
         // check_done's "no gap" is a model's judgement, not environment proof: recorded as a check, not as evidence
         if (name === "check_done" && Array.isArray(sc.gaps) && sc.gaps.length === 0 && !r.isError)
           changed = facts.addFact("check_done reported no open gaps (a model's judgement; not proof from the environment that the task succeeded)",
@@ -340,7 +347,7 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         if (name === "set_plan") progress.setPlan(plan.milestones);
         if (progress.onResult({ tool: name, args: params, status: st.status, isError: !!r.isError, refused: st.refused, action: isAction,
                                 observed: !!obs, why: text.split("\n")[0].slice(0, 200), sc, steps: st.steps, human: st.human, choice: st.choice,
-                                platform: platform.current ? PLATFORM_CONSTRAINT[platform.current] : null }) || name === "set_plan") saveProgress();
+                                platform: platform.current ? PLATFORM_CONSTRAINT[platform.current] : null, hold: st.hold }) || name === "set_plan") saveProgress();
 
         const notes = [...st.notes];
         if (pnote) notes.push(pnote);
@@ -363,7 +370,8 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
                  isError: !!r.isError,
                  details: secrets.any({ windowKey: wkey, gateError: !!r.isError, status: st.status, executed: st.executed,
                             next_action: st.nextAction, human_outcome: st.human, human_choice: st.choice, steps: st.steps, obs, images: ing.ids, gate: sc.gate || null,
-                            continuation_id: st.continuation, platform: platform.current }) };
+                            continuation_id: st.continuation, platform: platform.current, hold: st.hold, loop_state: st.loopState,
+                            ...(rr ? { reread: { focused_window: rr.focusedWindow, files: rr.files.length } } : {}) }) };
       },
     });
   }

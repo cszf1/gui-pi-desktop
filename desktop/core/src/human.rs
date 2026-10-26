@@ -244,6 +244,21 @@ pub fn view(req: &Request) -> Value {
             v["scope"] = json!(scope.clone());
             v["consequence"] = json!(consequence.clone());
             v["reason"] = json!(s_of(&m, &["reason"]));
+            // gate v0.10.3: the business premise the approval is bound to (value rows of the window, file versions). The
+            // person sees what exactly they approve; if it changes before the send the approval is void and they are
+            // asked again. Unreadable -> said plainly (the gate cannot confirm the content before it is sent).
+            let pr = m.get("premise").cloned().unwrap_or(Value::Null);
+            if pr.is_object() {
+                if pr.get("readable") == Some(&json!(false)) {
+                    v["premise_note"] = json!("The gate cannot read what this step acts on, so nothing confirms the content before it is sent. Allow only if you can see it yourself.");
+                } else {
+                    v["premise"] = json!(strs(pr.get("rows"), 12));
+                    v["premise_note"] = json!("You approve it as shown here. If any of this changes before it is sent, this approval is void and you are asked again.");
+                }
+            }
+            if let Some(u) = m.get("unknown_outcome").and_then(|x| x.as_str()) {
+                v["unknown_outcome"] = json!(u.chars().take(300).collect::<String>());
+            }
             // what Allow covers, said every time: this one effect only (nothing broader, nothing later)
             let what = if object.is_empty() { "this step".to_string() } else { format!("\"{object}\"") };
             v["only"] = json!(format!("Allow approves only this one effect: {what}{}. It does not approve other targets, other content,                 later steps or repeats; the gate asks again for anything else.",
@@ -1045,6 +1060,21 @@ mod tests {
         assert_eq!(p.wait("x", rx, 1.0), Outcome::Yes);
         assert_eq!(p.take_activity("x").active_s, Some(2.0));
         assert_eq!(p.take_activity("closed"), Activity::default());
+    }
+
+    #[test]
+    fn approve_shows_the_premise_and_an_unknown_earlier_send() {
+        let req = |kind: &str, meta: Value| Request { kind: kind.into(), message: "m".into(), meta, ..Default::default() };
+        let v = view(&req("approve", json!({"object": "mail to bob", "premise": {"readable": true, "digest": "ab", "snapshot": "s3",
+            "rows": ["To: bob@example.com", "Amount: 120.00"]}, "unknown_outcome": "this step was sent before and its outcome is unknown: it may already have happened"})));
+        assert_eq!(v["premise"], json!(["To: bob@example.com", "Amount: 120.00"]));
+        assert!(v["premise_note"].as_str().unwrap().contains("asked again"));
+        assert!(v["unknown_outcome"].as_str().unwrap().contains("may already have happened"));
+        let v = view(&req("approve", json!({"object": "x", "premise": {"readable": false, "note": "unverifiable"}})));
+        assert!(v.get("premise").is_none());
+        assert!(v["premise_note"].as_str().unwrap().contains("cannot read"));
+        let v = view(&req("approve", json!({"object": "x"})));
+        assert!(v.get("premise_note").is_none() && v.get("unknown_outcome").is_none());
     }
 
     #[test]

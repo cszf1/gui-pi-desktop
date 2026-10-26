@@ -1,0 +1,19 @@
+SHA256SUMS: gui-pi-desktop_0.3.0_universal.dmg ok (2f386caedb6cf3abe2b9b19e8cf14f29d296dd7c1a44a46d3ca57e69a2b2f32d)
+machine: 26.6.2 arm64
+gui-pi-desktop: x86_64 arm64
+node: x86_64 arm64
+gui-gate: x86_64 arm64
+cua-driver: x86_64 arm64
+gui-pi-desktop.app signature (unsigned by design; at most the linker's ad-hoc one): CodeDirectory v=20400 size=54296 flags=0x20002(adhoc,linker-signed) hashes=1693+0 location=embedded Signature=adhoc 
+CuaDriver.app (nested): signature valid (--deep --strict); Identifier=com.trycua.driver; Authority=Developer ID Application: Cua AI, Inc. (YCK386LBJ7); TeamIdentifier=YCK386LBJ7
+CuaDriver.app symlinks in the installed app: 0
+Gatekeeper (spctl) on gui-pi-desktop.app: /Users/runner/Applications/gui-pi-desktop.app: rejected
+cua-driver permissions status: Cua Driver sends content-free product telemetry by default. Run `cua-driver telemetry disable` to stop it; `cua-driver telemetry status` shows the current setting. {   "daemon_running": false,   "reason": "No CuaDriver daemon is running under the driver's own identity (com.trycua.driver), so its real TCC status can't be read from this process. Run `cua-driver permissions grant` to grant + verify a
+screenshot 01-main-window.png
+app --run exit 3 (3 = refused to start: no models configured)
+[self-check] macos: ok - macOS 26.6.2 (arm64).
+[self-check] accessibility: warn - Accessibility for CuaDriver is unknown (its helper is not running yet). Press "Grant permissions" below; macOS shows its own prompt for CuaDriver.
+[self-check] screen: warn - Screen Recording for CuaDriver is unknown (its helper is not running yet). Press "Grant permissions" below; macOS shows its own prompt for CuaDriver.
+[self-check] keychain: ok - macOS Keychain available: keys are stored in it.
+bundled gate e2e: OK
+smoke ok

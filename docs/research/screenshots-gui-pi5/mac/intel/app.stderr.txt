@@ -1,0 +1,16 @@
+[self-check] cua-driver permissions status: {
+  "daemon_running": false,
+  "reason": "No CuaDriver daemon is running under the driver's own identity (com.trycua.driver), so its real TCC status can't be read from this process. Run `cua-driver permissions grant` to grant + verify and start the daemon, then re-run this command.",
+  "status": "unknown"
+}
+[self-check] macos: ok - macOS 15.7.9 (x86_64).
+[self-check] accessibility: warn - Accessibility for CuaDriver is unknown (its helper is not running yet). Press "Grant permissions" below; macOS shows its own prompt for CuaDriver.
+[self-check] screen: warn - Screen Recording for CuaDriver is unknown (its helper is not running yet). Press "Grant permissions" below; macOS shows its own prompt for CuaDriver.
+[self-check] keychain: ok - macOS Keychain available: keys are stored in it.
+[self-check] bundle: All 15060 bundled files match the release's SHA256SUMS.
+Main model: base URL is required
+Main model: model name is required
+Main model: API key is not set
+Reviewer model (required): base URL is required
+Reviewer model (required): model name is required
+Reviewer model (required): API key is not set

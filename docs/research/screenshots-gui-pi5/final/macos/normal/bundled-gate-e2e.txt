@@ -1,0 +1,54 @@
+/Users/runner/work/gui-pi-desktop/gui-pi-desktop/gate/tests/test_actions_e2e.py:478: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
+  c = Modern("--policy", pol, person=Person(approve=DENY))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/runner/work/gui-pi-desktop/gui-pi-desktop/gate/tests/test_actions_e2e.py:478: ResourceWarning: unclosed file <_io.TextIOWrapper name=6 encoding='UTF-8'>
+  c = Modern("--policy", pol, person=Person(approve=DENY))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.............../Users/runner/work/gui-pi-desktop/gui-pi-desktop/gate/tests/test_actions_e2e.py:344: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
+  c = Modern(person=p)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=6 encoding='UTF-8'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+....../Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed <socket.socket fd=3, family=2, type=1, proto=0, laddr=('127.0.0.1', 49260)>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=7 encoding='UTF-8'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed <socket.socket fd=3, family=2, type=1, proto=0, laddr=('127.0.0.1', 49262)>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./Users/runner/work/gui-pi-desktop/gui-pi-desktop/gate/tests/test_actions_e2e.py:218: ResourceWarning: unclosed <socket.socket fd=3, family=2, type=1, proto=0, laddr=('127.0.0.1', 49264)>
+  rev = _Rev(decision)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/runner/work/gui-pi-desktop/gui-pi-desktop/gate/tests/test_actions_e2e.py:219: ResourceWarning: unclosed file <_io.TextIOWrapper name=7 encoding='UTF-8'>
+  c = Modern("--task", "draft a reply to Bob", reviewer_url=rev.url)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed <socket.socket fd=4, family=2, type=1, proto=0, laddr=('127.0.0.1', 49266)>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=8 encoding='UTF-8'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./Users/runner/work/gui-pi-desktop/gui-pi-desktop/gate/tests/test_actions_e2e.py:156: ResourceWarning: unclosed file <_io.TextIOWrapper name=6 encoding='UTF-8'>
+  self.c = Modern("--no-auto-observe")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/suite.py:107: ResourceWarning: unclosed file <_io.TextIOWrapper name=7 encoding='UTF-8'>
+  for index, test in enumerate(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/suite.py:107: ResourceWarning: unclosed file <_io.TextIOWrapper name=6 encoding='UTF-8'>
+  for index, test in enumerate(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...[gui-gate] driver restarted
+./Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/suite.py:84: ResourceWarning: unclosed file <_io.TextIOWrapper name=6 encoding='UTF-8'>
+  return self.run(*args, **kwds)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+----------------------------------------------------------------------
+Ran 30 tests in 60.096s
+
+OK

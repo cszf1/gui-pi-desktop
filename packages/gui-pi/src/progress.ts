@@ -54,9 +54,22 @@ function drop(list: Item[], pred: (x: Item) => boolean): boolean {
   return list.length !== n;
 }
 
-/** Postcondition evidence in a gate result (gate v0.10.3 names, read tolerantly): [{what, met, detail}]. */
+/** Postcondition evidence in a gate result, read tolerantly: [{what, met, detail}].
+ *  gate v0.10.3 (final): `postcondition: {status: verified | unverifiable | reread | none, evidence, reread}` - verified
+ *  is evidence (met), unverifiable means the driver could not check the effect (unchecked), none / reread report no
+ *  postcondition (the observed-or-not rule applies; reread belongs to a person's step). The list form the client
+ *  accepted before (`postconditions: [{what, met, detail}]`) still reads. */
 export type Post = { what: string; met: boolean | null; detail: string };
+const POST_STATUS = new Set(["verified", "unverifiable", "reread", "none", "confirmed"]);
 export function postconditions(sc: any): Post[] {
+  const one = sc?.postcondition;
+  if (one && typeof one === "object" && !Array.isArray(one) && typeof one.status === "string" && POST_STATUS.has(one.status)) {
+    const ev = one.evidence === null || one.evidence === undefined ? "" : short(one.evidence, 160);
+    if (one.status === "verified" || one.status === "confirmed")
+      return [{ what: "the step's effect", met: true, detail: ev ? `verified by the driver (${ev})` : "verified by the driver" }];
+    if (one.status === "unverifiable") return [{ what: "the step's effect", met: null, detail: "the driver could not verify it" }];
+    return [];
+  }
   const raw = sc?.postconditions ?? sc?.postcondition ?? sc?.evidence ?? sc?.state?.postconditions ?? null;
   if (raw === null || raw === undefined) return [];
   const arr = Array.isArray(raw) ? raw : [raw];
@@ -97,6 +110,8 @@ export type ResultInfo = {
   human?: string | null;
   choice?: string | null;
   platform?: string | null;
+  /** gate v0.10.3 hold (status.ts holdOf): premise | unknown_hold | review_unavailable */
+  hold?: string | null;
 };
 
 export class Progress {
@@ -121,7 +136,7 @@ export class Progress {
     }
     if (r.refused) ch = push(this.failures, `${call}: refused by the gate${r.human ? ` (person: ${r.human})` : ""} - ${r.why}`, MAX_FAILURES) || ch;
     else if (r.choice === "another_way") ch = push(this.failures, `${call}: the person asked for another way (not a refusal)`, MAX_FAILURES) || ch;
-    else if (r.status === "blocked" && !r.human) ch = push(this.failures, `${call}: not executed - ${r.why}`, MAX_FAILURES) || ch;
+    else if (r.status === "blocked" && !r.human) { if (!r.hold) ch = push(this.failures, `${call}: not executed - ${r.why}`, MAX_FAILURES) || ch; }
     else if (r.isError && r.action && r.status !== "unknown") ch = push(this.failures, `${call}: error - ${r.why}`, MAX_FAILURES) || ch;
     if (r.status === "partial" && r.steps) {
       const notRun = r.steps.notRun?.length ? `steps ${r.steps.notRun.map((i) => i + 1).join(", ")}` : `steps after step ${r.steps.ran}`;
@@ -133,6 +148,15 @@ export class Progress {
       ch = push(this.constraints, `a person did "${call}" themselves: never send it again`, MAX_ITEMS, `person:${call}`) || ch;
       ch = drop(this.open, (x) => x.key === `input:${call}`) || ch;
     }
+    if (r.hold === "unknown_hold") {
+      ch = push(this.constraints, `"${call}" may already have happened (unknown outcome, cannot happen twice): never resend it; report it as possibly done`, MAX_ITEMS, `hold:${call}`) || ch;
+      ch = drop(this.open, (x) => x.key === "reread") || ch;
+    } else if (r.hold === "premise") {
+      ch = push(this.open, `${call}: what the person approved changed before it was sent - re-read; a re-send asks the person again`, MAX_ITEMS, `premise:${call}`) || ch;
+    } else if (r.hold === "review_unavailable") {
+      ch = push(this.failures, `${call}: not sent - its review was unavailable and no person was reachable`, MAX_FAILURES) || ch;
+    }
+    if (r.status === "executed" || r.status === "done") ch = drop(this.open, (x) => x.key === `premise:${call}`) || ch;
     if (sc?.gate?.tier === "write_args") ch = push(this.constraints, "read tools cannot write files (no destination argument on get_window_state / inspect)", MAX_ITEMS, "write_args") || ch;
     if (r.human === "not_asked_again") ch = push(this.constraints, `the person is not asked again about "${call}" in this task`, MAX_ITEMS, `naa:${call}`) || ch;
     if (r.platform) ch = push(this.constraints, r.platform, MAX_ITEMS, "platform") || ch;

@@ -1,0 +1,110 @@
+test_freeze_ends_on_timeout (test_sec_regressions.AgentCannotEndAPendingRequest.test_freeze_ends_on_timeout) ... ok
+test_gate_reset_does_not_unfreeze_or_approve (test_sec_regressions.AgentCannotEndAPendingRequest.test_gate_reset_does_not_unfreeze_or_approve) ... FAIL
+test_wrong_or_answerless_retries_do_not_end_it (test_sec_regressions.AgentCannotEndAPendingRequest.test_wrong_or_answerless_retries_do_not_end_it) ... FAIL
+test_answer_from_an_older_task_version_is_not_used (test_sec_regressions.ApprovalBoundToTaskVersion.test_answer_from_an_older_task_version_is_not_used) ... FAIL
+test_legacy_elicitation_conflicting_form_is_a_refusal (test_sec_regressions.ConflictingApprovalForm.test_legacy_elicitation_conflicting_form_is_a_refusal) ... FAIL
+test_modern_conflicting_form_is_a_refusal (test_sec_regressions.ConflictingApprovalForm.test_modern_conflicting_form_is_a_refusal) ... FAIL
+test_other_ambiguous_forms_are_refusals (test_sec_regressions.ConflictingApprovalForm.test_other_ambiguous_forms_are_refusals) ... FAIL
+test_write_path_inside_run_actions_is_refused (test_sec_regressions.ReadOnlyToolsDoNotWrite.test_write_path_inside_run_actions_is_refused) ... ok
+test_write_path_on_a_read_is_refused_and_nothing_is_written (test_sec_regressions.ReadOnlyToolsDoNotWrite.test_write_path_on_a_read_is_refused_and_nothing_is_written) ... FAIL
+test_same_unmodelled_effect_with_reordered_args_is_caught (test_sec_regressions.UnknownOutcomeNotReSent.test_same_unmodelled_effect_with_reordered_args_is_caught) ... FAIL
+test_unmodelled_action_is_not_re_sent_after_unknown (test_sec_regressions.UnknownOutcomeNotReSent.test_unmodelled_action_is_not_re_sent_after_unknown) ... FAIL
+
+======================================================================
+FAIL: test_gate_reset_does_not_unfreeze_or_approve (test_sec_regressions.AgentCannotEndAPendingRequest.test_gate_reset_does_not_unfreeze_or_approve)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 153, in test_gate_reset_does_not_unfreeze_or_approve
+    self.assertEqual(r["structuredContent"]["status"], "blocked", txt(r))
+AssertionError: 'executed' != 'blocked'
+- executed
++ blocked
+ : Clicked element [0] button "Increment".
+[gate] Window right after the action (snapshot s00000003; tokens are s00000003:N, older tokens are stale). Only rows that changed since snapshot s00000002 are shown (2 of 6 rows, with their parents); every other row is unchanged and keeps its [N], so s00000003:N tokens work for those too.
+- frame = "Fixture"
+    - [2] text "count=1" [actions=[click]]
+
+======================================================================
+FAIL: test_wrong_or_answerless_retries_do_not_end_it (test_sec_regressions.AgentCannotEndAPendingRequest.test_wrong_or_answerless_retries_do_not_end_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 177, in test_wrong_or_answerless_retries_do_not_end_it
+    self.assertEqual(r["structuredContent"]["status"], "blocked", txt(r))
+AssertionError: 'executed' != 'blocked'
+- executed
++ blocked
+ : Clicked element [0] button "Increment".
+[gate] Window right after the action (snapshot s00000003; tokens are s00000003:N, older tokens are stale). Only rows that changed since snapshot s00000002 are shown (2 of 6 rows, with their parents); every other row is unchanged and keeps its [N], so s00000003:N tokens work for those too.
+- frame = "Fixture"
+    - [2] text "count=1" [actions=[click]]
+
+======================================================================
+FAIL: test_answer_from_an_older_task_version_is_not_used (test_sec_regressions.ApprovalBoundToTaskVersion.test_answer_from_an_older_task_version_is_not_used)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 92, in test_answer_from_an_older_task_version_is_not_used
+    self.assertNotIn("Delete file", state(c)["clicked"], "an approval given under task version 1 executed under version 2")
+AssertionError: 'Delete file' unexpectedly found in ['Delete file'] : an approval given under task version 1 executed under version 2
+
+======================================================================
+FAIL: test_legacy_elicitation_conflicting_form_is_a_refusal (test_sec_regressions.ConflictingApprovalForm.test_legacy_elicitation_conflicting_form_is_a_refusal)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 66, in test_legacy_elicitation_conflicting_form_is_a_refusal
+    self.assertTrue(r.get("isError"), txt(r))
+AssertionError: None is not true : Clicked element [1] button "Delete file".
+[gate] Window right after the action (snapshot s00000002; tokens are s00000002:N, older tokens are stale). Nothing in the tree changed since snapshot s00000001 (6 rows); its [N] are valid as s00000002:N.
+
+
+======================================================================
+FAIL: test_modern_conflicting_form_is_a_refusal (test_sec_regressions.ConflictingApprovalForm.test_modern_conflicting_form_is_a_refusal)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 43, in test_modern_conflicting_form_is_a_refusal
+    self.assertTrue(r.get("isError"), txt(r))
+AssertionError: None is not true : Clicked element [1] button "Delete file".
+[gate] Window right after the action (snapshot s00000002; tokens are s00000002:N, older tokens are stale). Nothing in the tree changed since snapshot s00000001 (6 rows); its [N] are valid as s00000002:N.
+
+
+======================================================================
+FAIL: test_other_ambiguous_forms_are_refusals (test_sec_regressions.ConflictingApprovalForm.test_other_ambiguous_forms_are_refusals)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 55, in test_other_ambiguous_forms_are_refusals
+    self.assertTrue(r.get("isError"), (content, txt(r)))
+AssertionError: None is not true : ({'decision': 'allow', 'allow': False}, 'Clicked element [1] button "Delete file".\n[gate] Window right after the action (snapshot s00000002; tokens are s00000002:N, older tokens are stale). Nothing in the tree changed since snapshot s00000001 (6 rows); its [N] are valid as s00000002:N.\n')
+
+======================================================================
+FAIL: test_write_path_on_a_read_is_refused_and_nothing_is_written (test_sec_regressions.ReadOnlyToolsDoNotWrite.test_write_path_on_a_read_is_refused_and_nothing_is_written)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 118, in test_write_path_on_a_read_is_refused_and_nothing_is_written
+    self.assertTrue(r.get("isError"), (name, txt(r)))
+AssertionError: None is not true : ('get_window_state', 'window_id=777 pid=4242 snapshot_id=s00000001\n- frame = "Fixture"\n    - [0] button "Increment" [actions=[click]]\n    - [1] button "Delete file" [actions=[click]]\n    - [2] text "count=0" [actions=[click]]\n    - [3] button "OK" [actions=[click]]\n    - [4] button "OK" [actions=[click]]\n\n')
+
+======================================================================
+FAIL: test_same_unmodelled_effect_with_reordered_args_is_caught (test_sec_regressions.UnknownOutcomeNotReSent.test_same_unmodelled_effect_with_reordered_args_is_caught)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 222, in test_same_unmodelled_effect_with_reordered_args_is_caught
+    self.assertEqual(r["structuredContent"]["status"], "blocked", txt(r))
+AssertionError: 'executed' != 'blocked'
+- executed
++ blocked
+ : launch_app ok delivery=background
+
+======================================================================
+FAIL: test_unmodelled_action_is_not_re_sent_after_unknown (test_sec_regressions.UnknownOutcomeNotReSent.test_unmodelled_action_is_not_re_sent_after_unknown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v2-sec/tests/test_sec_regressions.py", line 205, in test_unmodelled_action_is_not_re_sent_after_unknown
+    self.assertEqual(r["structuredContent"]["status"], "blocked", txt(r))
+AssertionError: 'executed' != 'blocked'
+- executed
++ blocked
+ : set_clipboard ok delivery=background
+
+----------------------------------------------------------------------
+Ran 11 tests in 8.369s
+
+FAILED (failures=9)

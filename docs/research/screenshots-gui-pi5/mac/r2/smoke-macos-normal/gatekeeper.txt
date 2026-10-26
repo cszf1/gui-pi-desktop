@@ -1,0 +1,2 @@
+/Users/runner/Applications/gui-pi-desktop.app: rejected
+source=no usable signature

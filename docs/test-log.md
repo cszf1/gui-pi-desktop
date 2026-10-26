@@ -296,3 +296,9 @@ gate ci.yml [run 40236851630](https://github.com/cszf1/gui-gate/actions/runs/402
 | 壳：四种弹窗内容、wait_s / active_s（gui-pi-human/2）、角色显式关闭与门内版本默认关闭、失效 DBus / AT-SPI 地址、时间线（结果未知 / 未跑步骤 / 人做过 / 平台）+ 全部 core 测试 | 过 | 单元 + 脚本 | `cargo test -p gpd-core`：66 + 3（新增 4 个）；`cargo check -p gui-pi-desktop`（含 / 不含 test-hooks）通过 | 2026-10-26 |
 | 真实模型 / 在线任务 / 真机（Windows UAC·锁屏·RDP 的实际错误措辞、macOS 签名与升级后权限） | — | 未测（按要求本版不做） | — | — |
 
+## 2026-10-26 0.3.2 发版（打包 gui-gate v0.10.3 c984a45）：只做单元 / 脚本验证
+
+| 项 | 结果 | 验证方式 | 证据 | 日期 |
+|---|---|---|---|---|
+| gate v0.10.3 字段对齐（completed_steps / next_step / executed / continuation_id / loop_state / postcondition.status、premise / unknown_hold / review_unavailable、reread 去重）+ 全部扩展测试；壳时间线与批准弹窗前提 + 全部 core 测试；打包的 gui-gate v0.10.3：cargo test + 按 ci.yml 环境变量逐文件跑 python 套件 | 过 | 单元 + 脚本(假 gate / fake_driver) | 扩展 `node --test test/*.test.ts` 96/96（新增 test/gate0103.test.ts 6 个）；`cargo test -p gpd-core` 68 + 3；gui-gate cargo 181 过 / 7 忽略，python 21 个文件 375 个测试 OK | 2026-10-26 |
+

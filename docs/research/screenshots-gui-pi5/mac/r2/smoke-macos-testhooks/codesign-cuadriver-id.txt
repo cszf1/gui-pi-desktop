@@ -1,0 +1,15 @@
+Executable=/Users/runner/Applications/gui-pi-desktop.app/Contents/Resources/resources/CuaDriver.app/Contents/MacOS/cua-driver
+Identifier=com.trycua.driver
+Format=app bundle with Mach-O universal (x86_64 arm64)
+CodeDirectory v=20500 size=76061 flags=0x10000(runtime) hashes=2366+7 location=embedded
+Signature size=9044
+Authority=Developer ID Application: Cua AI, Inc. (YCK386LBJ7)
+Authority=Developer ID Certification Authority
+Authority=Apple Root CA
+Timestamp=Oct 20, 2026 at 10:31:54 PM
+Notarization Ticket=stapled
+Info.plist entries=15
+TeamIdentifier=YCK386LBJ7
+Runtime Version=26.5.0
+Sealed Resources version=2 rules=13 files=3
+Internal requirements count=1 size=180

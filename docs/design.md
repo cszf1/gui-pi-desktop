@@ -1,6 +1,6 @@
 # gui-pi-desktop 设计文档
 
-版本 0.3.2（2026-10-26，按第二轮外部审阅 review-2026-10-26-v2 的客户端部分修订，逐条清单见 docs/review-v3-checklist-desktop.md；0.3 按第一轮审阅 §4/§5/§7 修订；打包 gui-gate v0.10.2，已按向前兼容方式适配即将发布的 v0.10.3 结构化执行状态（§11）；变更见 CHANGELOG.md）。范围：桌面版 computer-use agent，Linux 先做，然后 Windows，最后 macOS。
+版本 0.3.2（2026-10-26，按第二轮外部审阅 review-2026-10-26-v2 的客户端部分修订，逐条清单见 docs/review-v3-checklist-desktop.md；0.3 按第一轮审阅 §4/§5/§7 修订；打包 gui-gate v0.10.3（最后一版独立 MCP，字段名按其最终版本对齐，§11）；变更见 CHANGELOG.md）。范围：桌面版 computer-use agent，Linux 先做，然后 Windows，最后 macOS。
 
 一句话：**Tauri 壳 + Pi 1.4.0（@earendil-works/pi-coding-agent，RPC 模式，packaging/pi 锁定）+ Pi 扩展 gui-pi（TypeScript）+ gui-gate（Rust 门控）+ cua-driver 0.38.0（固定版本）**，一个安装包装好就能用。
 
@@ -256,7 +256,7 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
 
 ### 5.4 门代码今后在哪里演进（2026-10-26）
 
-门代码今后在桌面仓库这条线上演进：gui-gate v0.10.2 是它作为独立 MCP 的最后一版，三个工作流的 `GATE_REF` 固定指向 v0.10.2 的提交，构建时仍从 cszf1/gui-gate 拉取这个固定来源。下一步是否把 gate 源码并入本仓库（例如 `gate/` 子目录，连同它的 Rust / Python 测试和 bench）另行决定；这次不做大搬迁。
+门代码今后在桌面仓库这条线上演进：gui-gate v0.10.3 是它作为独立 MCP 的最后一版（0.3.1 打包的是 v0.10.2），三个工作流的 `GATE_REF` 固定指向 v0.10.3 的提交，构建时仍从 cszf1/gui-gate 拉取这个固定来源。下一步是否把 gate 源码并入本仓库（例如 `gate/` 子目录，连同它的 Rust / Python 测试和 bench）另行决定；这次不做大搬迁。
 
 ## 6. 桌面壳（Tauri 2）
 
@@ -433,7 +433,7 @@ Windows：数据在 `%APPDATA%\io.github.cszf1.gui-pi-desktop`（设置、会话
 - **回滚**：`packaging/linux/appimage-update.sh install NEW.AppImage SHA256SUMS` 先按发布的 SHA256SUMS 校验（不在清单里或哈希不对就拒绝），再把当前版改名为 `gui-pi-desktop.previous.AppImage`、新版成为当前版；`rollback` 交换两者。设置和数据目录两版共用。有测试。
 - 依赖：AT-SPI（at-spi2-core）、webkit2gtk-4.1；.deb 声明依赖，AppImage 运行时检查并提示。
 - 布置资源：`scripts/stage-resources.sh <已构建的 gui-gate 检出目录>` 生成 `dist/resources/`（node 按 SHASUMS256 校验、Pi 按 package-lock `npm ci`、扩展/提示词/skills、gate 二进制、驱动按锁文件哈希和签名校验），最后写 SHA256SUMS。
-- CI：`.github/workflows/linux.yml`，GitHub Actions ubuntu-22.04：构建并测试固定提交的 gui-gate（`GATE_REF`）→ 扩展测试 → `cargo test -p gpd-core` → stage-resources → `tauri build`（AppImage + deb）。`.github/workflows/windows.yml`（windows-latest：gate 构建 + cargo test + fake_driver e2e / 安全 / meta 套件、扩展测试、gpd-core 测试 → NSIS + MSI → 在 runner 桌面静默安装、自检、组件校验、截图、测试钩子版四种弹窗、包内 gui-gate.exe 跑 e2e、卸载）；`.github/workflows/macos.yml`（macos-latest 构建 universal .app/.dmg 并冒烟，再在 Intel runner 上跑同一个 universal 包）。三个工作流用同一个 `GATE_REF`（0.3.1 起是 gui-gate v0.10.2）；main 上的推送发布预发布 `build-<sha>-{linux,windows,macos}`（及 `-testhooks`）；推 `v*` tag 时三个工作流把包加到同一个正式 release `vX.Y.Z`，测试钩子版进预发布 `vX.Y.Z-testhooks`（Linux 的测试钩子版由在该 tag 上手动运行 linux.yml 并勾选 test_hooks 产生）。
+- CI：`.github/workflows/linux.yml`，GitHub Actions ubuntu-22.04：构建并测试固定提交的 gui-gate（`GATE_REF`）→ 扩展测试 → `cargo test -p gpd-core` → stage-resources → `tauri build`（AppImage + deb）。`.github/workflows/windows.yml`（windows-latest：gate 构建 + cargo test + fake_driver e2e / 安全 / meta 套件、扩展测试、gpd-core 测试 → NSIS + MSI → 在 runner 桌面静默安装、自检、组件校验、截图、测试钩子版四种弹窗、包内 gui-gate.exe 跑 e2e、卸载）；`.github/workflows/macos.yml`（macos-latest 构建 universal .app/.dmg 并冒烟，再在 Intel runner 上跑同一个 universal 包）。三个工作流用同一个 `GATE_REF`（0.3.1 是 gui-gate v0.10.2，0.3.2 起是 v0.10.3）；main 上的推送发布预发布 `build-<sha>-{linux,windows,macos}`（及 `-testhooks`）；推 `v*` tag 时三个工作流把包加到同一个正式 release `vX.Y.Z`，测试钩子版进预发布 `vX.Y.Z-testhooks`（Linux 的测试钩子版由在该 tag 上手动运行 linux.yml 并勾选 test_hooks 产生）。
 
 ---
 
@@ -513,7 +513,7 @@ Windows：数据在 `%APPDATA%\io.github.cszf1.gui-pi-desktop`（设置、会话
 
 v0.10.2（0.3.1 起打包）：ask_help 结果带 `human_choice`（`another_way` = 人让换个方法，是回答；`did_it`）；新 `human_outcome`：`task_changed`、作废（reset 后 `void`，其超时带 `voided`）、`late`、`not_asked_again`、`expired`、`channel_unavailable`，答案被拒收时 gate 回 JSON-RPC `-32602 Invalid requestState`（扩展记为 `answer_rejected`）；`tier: "write_args"`（读工具带写文件参数被拒）；`tier: "freeze"`（有人在回答，reset 之后也一样，直到回答或超时）；审核原话不再返回，`gate_report.reviewer` 只是 `configured | none`；应用文本里像 gate 行的内容被加上 `(app text) ` 前缀；gate 自己的桌面对话框默认按钮是拒绝。
 
-v0.10.3（即将发布；0.3.2 已按向前兼容适配，GATE_REF 仍是 v0.10.2）：统一执行状态 `status: done | partial | unknown | input_required | done_by_person | blocked`、`continuation_id`、已完成批量下标 `completed`、后置条件证据 `postconditions`、可选 `constraints`；具体字段名与别名见 §4.5。任何字段缺失都按 0.3.1 的行为处理（单元测试覆盖“有”和“没有”两种）。角色：桌面版对每个角色发显式 `GUI_GATE_ROLE_<NAME>_ENABLE=0|1`（§6.2），期望 v0.10.3 的 gate 按“显式关闭优先于组开关和端点存在”执行。
+v0.10.3（0.3.2 起打包，GATE_REF c984a45）：统一执行状态 `status: done | partial | unknown | input_required | done_by_person | blocked`，动作结果另有 `executed`（true / false / "unknown"）、`continuation_id`、批量 `completed_steps`（0 起的下标）/ `next_step`、`postcondition {status: verified | unverifiable | reread | none}`、`loop_state`（normal / switch_strategy / blocked_repeat / help_or_stop）；接管 / 替做之后 `reread {window, focused_window, focused_title, files_changed, note}`；未知结果账本 `gate.decision: unknown_hold`、业务前提变化 `gate.tier: premise`、审核不可用 `gate.decision: review_unavailable`；批准请求的 `_meta.premise {readable, rows, digest, snapshot}` 与 `unknown_outcome`。`person_request` / `person_request_end` 只是 gate 日志事件。客户端早先自定的别名（`completed`、`postconditions`、`constraints`）仍接受；具体读法见 §4.5 与 status.ts 顶部注释。任何字段缺失都按 0.3.1 的行为处理（单元测试覆盖“有”和“没有”两种）。角色：桌面版对每个角色发显式 `GUI_GATE_ROLE_<NAME>_ENABLE=0|1`（§6.2），期望 v0.10.3 的 gate 按“显式关闭优先于组开关和端点存在”执行。
 
 ## 12. 威胁模型
 

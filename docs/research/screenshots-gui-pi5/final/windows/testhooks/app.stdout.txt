@@ -1,0 +1,12 @@
+{"gate_kind":"approve","id":"demo-1-approve","kind":"demo_ask","type":"approve"}
+{"kind":"human","refused":false,"text":"approve -> allowed"}
+{"gate_kind":"approve","kind":"demo_reply","reply":{"action":"accept","content":{"decision":"allow"},"id":"demo-1-approve"}}
+{"gate_kind":"answer","id":"demo-2-answer","kind":"demo_ask","type":"clarify"}
+{"kind":"human","refused":false,"text":"answer -> answered"}
+{"gate_kind":"answer","kind":"demo_reply","reply":{"action":"accept","content":{"answer":"Shuffle labels"},"id":"demo-2-answer"}}
+{"gate_kind":"takeover","id":"demo-3-takeover","kind":"demo_ask","type":"takeover"}
+{"kind":"human","refused":false,"text":"takeover -> done by the person"}
+{"gate_kind":"takeover","kind":"demo_reply","reply":{"action":"accept","content":{"done":true},"id":"demo-3-takeover"}}
+{"gate_kind":"ask_help","id":"demo-4-ask_help","kind":"demo_ask","type":"help"}
+{"kind":"human","refused":true,"text":"ask_help -> timed out"}
+{"gate_kind":"ask_help","kind":"demo_reply","reply":{"action":"decline","id":"demo-4-ask_help","reason":"timed_out"}}

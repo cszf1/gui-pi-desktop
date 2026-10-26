@@ -1,0 +1,1 @@
+/Users/runner/Applications/gui-pi-desktop.app: code object is not signed at all

@@ -1,0 +1,22 @@
+[self-check] cua-driver permissions status: {
+  "daemon_running": false,
+  "reason": "No CuaDriver daemon is running under the driver's own identity (com.trycua.driver), so its real TCC status can't be read from this process. Run `cua-driver permissions grant` to grant + verify and start the daemon, then re-run this command.",
+  "status": "unknown"
+}
+[self-check] macos: ok - macOS 26.6.2 (arm64).
+[self-check] accessibility: warn - Accessibility for CuaDriver is unknown (its helper is not running yet). Press "Grant permissions" below; macOS shows its own prompt for CuaDriver.
+[self-check] screen: warn - Screen Recording for CuaDriver is unknown (its helper is not running yet). Press "Grant permissions" below; macOS shows its own prompt for CuaDriver.
+[self-check] keychain: ok - macOS Keychain available: keys are stored in it.
+[self-check] bundle: All 15060 bundled files match the release's SHA256SUMS.
+[popup] popup-1-demo1approve fit to 480x232 (content 232, ok true)
+[popup] popup-1-demo1approve fit to 480x232 (content 232, ok true)
+[popup] popup-1-demo1approve fit to 480x232 (content 232, ok true)
+[popup] popup-2-demo2answer fit to 480x284 (content 284, ok true)
+[popup] popup-2-demo2answer fit to 480x284 (content 284, ok true)
+[popup] popup-2-demo2answer fit to 480x284 (content 284, ok true)
+[popup] popup-3-demo3takeover fit to 480x266 (content 266, ok true)
+[popup] popup-3-demo3takeover fit to 480x266 (content 266, ok true)
+[popup] popup-3-demo3takeover fit to 480x266 (content 266, ok true)
+[popup] popup-4-demo4askhelp fit to 480x275 (content 275, ok true)
+[popup] popup-4-demo4askhelp fit to 480x275 (content 275, ok true)
+[popup] popup-4-demo4askhelp fit to 480x275 (content 275, ok true)

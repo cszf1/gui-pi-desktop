@@ -54,6 +54,10 @@ const button = (label, cls, fn, parent = btns, choice) => { const b = el("button
 if (v.type === "approve") {
   fact("What", v.object); fact("Scope", v.scope); fact("If you allow", v.consequence); fact("Why the gate asks", v.reason);
   if ((v.missing || []).length) facts.appendChild(el("div", "muted", `The gate did not say: ${v.missing.join(", ")}. If you are not sure what this does, deny.`));
+  // gate v0.10.3: what exactly is approved (the window's value rows / file versions the approval is bound to)
+  list("Approved as it is now:", v.premise);
+  if (v.premise_note) facts.appendChild(el("div", "muted", v.premise_note));
+  if (v.unknown_outcome) facts.appendChild(el("div", "fact", "Careful: " + v.unknown_outcome));
   if (v.only) facts.appendChild(el("div", "fact", v.only));
   button("Deny", "", () => send("no"), btns, "no");
   button("Allow", "primary", () => send("yes"), btns, "yes");

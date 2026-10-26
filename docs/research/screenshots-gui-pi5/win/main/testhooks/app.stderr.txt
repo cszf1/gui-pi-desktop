@@ -1,0 +1,20 @@
+[self-check] windows: ok - Windows Server 2025 Datacenter 24H2 (build 26100).
+[self-check] webview2: ok - WebView2 runtime 155.0.4283.62.
+[self-check] uia: ok - UI Automation answers (6 top-level windows).
+[self-check] session: warn - Unknown session type (SESSIONNAME not set); the agent needs an interactive, unlocked desktop.
+[self-check] elevation: warn - The app runs as administrator, so the agent could act on administrator windows too. Start it normally; it asks you to take over where admin rights are needed.
+[self-check] keychain: ok - Windows Credential Manager available: keys are stored in it.
+[self-check] bundle: All 15072 bundled files match the release's SHA256SUMS.
+[popup] popup-1-demo1approve fit to 480x227 (content 227, ok true)
+[popup] popup-1-demo1approve fit to 480x227 (content 227, ok true)
+[popup] popup-1-demo1approve fit to 480x227 (content 227, ok true)
+[popup] popup-2-demo2answer fit to 480x298 (content 298, ok true)
+[popup] popup-2-demo2answer fit to 480x298 (content 298, ok true)
+[popup] popup-2-demo2answer fit to 480x298 (content 298, ok true)
+[popup] popup-3-demo3takeover fit to 480x282 (content 282, ok true)
+[popup] popup-3-demo3takeover fit to 480x282 (content 282, ok true)
+[popup] popup-3-demo3takeover fit to 480x282 (content 282, ok true)
+[popup] popup-4-demo4askhelp fit to 480x290 (content 290, ok true)
+[popup] popup-4-demo4askhelp fit to 480x290 (content 290, ok true)
+[popup] popup-4-demo4askhelp fit to 480x290 (content 290, ok true)
+[1025/205551.739:ERROR:ui\gfx\win\window_impl.cc:172] Failed to unregister class Chrome_WidgetWin_0. Error = 1412

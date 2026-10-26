@@ -1,0 +1,28 @@
+gui-pi-desktop_0.3.0_amd64.AppImage: OK
+{"gate_kind":"approve","kind":"demo_reply","reply":{"action":"accept","content":{"decision":"allow"},"id":"demo-1-approve"}}
+{"gate_kind":"answer","kind":"demo_reply","reply":{"action":"accept","content":{"answer":"Shuffle labels"},"id":"demo-2-answer"}}
+{"gate_kind":"takeover","kind":"demo_reply","reply":{"action":"accept","content":{"done":true},"id":"demo-3-takeover"}}
+{"gate_kind":"ask_help","kind":"demo_reply","reply":{"action":"decline","id":"demo-4-ask_help","reason":"timed_out"}}
+[popup] popup-1-demo1approve fit to 480x228 (content 228, ok true, seen 380)
+[popup] popup-1-demo1approve fit to 480x228 (content 228, ok true, seen 228)
+[popup] popup-1-demo1approve fit to 480x228 (content 228, ok true, seen 228)
+[popup] popup-1-demo1approve fit to 480x228 (content 228, ok true, seen 228)
+[popup] popup-2-demo2answer fit to 480x282 (content 282, ok true, seen 380)
+[popup] popup-2-demo2answer fit to 480x282 (content 282, ok true, seen 282)
+[popup] popup-2-demo2answer fit to 480x282 (content 282, ok true, seen 282)
+[popup] popup-2-demo2answer fit to 480x282 (content 282, ok true, seen 282)
+[popup] popup-3-demo3takeover fit to 480x262 (content 262, ok true, seen 420)
+[popup] popup-3-demo3takeover fit to 480x262 (content 262, ok true, seen 262)
+[popup] popup-3-demo3takeover fit to 480x262 (content 262, ok true, seen 262)
+[popup] popup-3-demo3takeover fit to 480x262 (content 262, ok true, seen 262)
+[popup] popup-4-demo4askhelp fit to 480x272 (content 272, ok true, seen 420)
+[popup] popup-4-demo4askhelp fit to 480x272 (content 272, ok true, seen 272)
+[popup] popup-4-demo4askhelp fit to 480x272 (content 272, ok true, seen 272)
+[popup] popup-4-demo4askhelp fit to 480x272 (content 272, ok true, seen 272)
+[self-check] session: ok - X11 session (DISPLAY=:99).
+[self-check] dbus: ok - DBus session bus reachable.
+[self-check] atspi: fail - The AT-SPI accessibility bus is not reachable, so app windows cannot be read. Install at-spi2-core and make sure accessibility is enabled (GNOME: gsettings set org.gnome.desktop.interface toolkit-accessibility true), then log out and in.
+[self-check] keychain: warn - No system keychain is available (on Linux: no Secret Service such as gnome-keyring or KWallet is running). Keys are kept in memory for this run only and are never written to disk: you will enter them again next time.
+[self-check] glibc: ok - glibc 2.35.
+[self-check] webkit: ok - WebKitGTK found (libwebkit2gtk-4.1.so.0.19.7).
+[self-check] bundle: All 15059 bundled files match the release's SHA256SUMS.

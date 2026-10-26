@@ -17,7 +17,7 @@ for f in "$@"; do
   case "$b" in SHA256SUMS|resources.SHA256SUMS) cp "$f" "$stage/$b.$plat" ;; *) cp "$f" "$stage/$b" ;; esac
 done
 notes="gui-pi-desktop $ver: Linux (AppImage + .deb), Windows x86_64 (NSIS + MSI, unsigned), macOS 13+ universal (.dmg, unsigned, not notarized: docs/design.md §6.8).
-Bundles gui-gate ${GATE_REF::7} (v0.10.2, the last standalone gui-gate release; the gate now evolves with this app) and Cua Driver 0.38.0.
+Bundles gui-gate ${GATE_REF::7} (v0.10.3, the final standalone gui-gate release; the gate now evolves with this app) and Cua Driver 0.38.0.
 Check a download against SHA256SUMS.<platform>; the app checks its bundled files against resources.SHA256SUMS at start.
 Changes: CHANGELOG.md."
 [ "$variant" = testhooks ] && notes="TEST HOOKS ON: scripted person answers and --demo-popups; for test machines only, never for real use.

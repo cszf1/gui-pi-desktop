@@ -1,0 +1,9 @@
+Executable=/Users/runner/Applications/gui-pi-desktop.app/Contents/MacOS/gui-pi-desktop
+Identifier=gui_pi_desktop-ca62bd44e11db0a9
+Format=app bundle with Mach-O universal (x86_64 arm64)
+CodeDirectory v=20400 size=54296 flags=0x20002(adhoc,linker-signed) hashes=1693+0 location=embedded
+Signature=adhoc
+Info.plist=not bound
+TeamIdentifier=not set
+Sealed Resources=none
+Internal requirements=none

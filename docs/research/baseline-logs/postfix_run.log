@@ -1,0 +1,16 @@
+test_freeze_ends_on_timeout (test_sec_regressions.AgentCannotEndAPendingRequest.test_freeze_ends_on_timeout) ... ok
+test_gate_reset_does_not_unfreeze_or_approve (test_sec_regressions.AgentCannotEndAPendingRequest.test_gate_reset_does_not_unfreeze_or_approve) ... ok
+test_wrong_or_answerless_retries_do_not_end_it (test_sec_regressions.AgentCannotEndAPendingRequest.test_wrong_or_answerless_retries_do_not_end_it) ... ok
+test_answer_from_an_older_task_version_is_not_used (test_sec_regressions.ApprovalBoundToTaskVersion.test_answer_from_an_older_task_version_is_not_used) ... ok
+test_legacy_elicitation_conflicting_form_is_a_refusal (test_sec_regressions.ConflictingApprovalForm.test_legacy_elicitation_conflicting_form_is_a_refusal) ... ok
+test_modern_conflicting_form_is_a_refusal (test_sec_regressions.ConflictingApprovalForm.test_modern_conflicting_form_is_a_refusal) ... ok
+test_other_ambiguous_forms_are_refusals (test_sec_regressions.ConflictingApprovalForm.test_other_ambiguous_forms_are_refusals) ... ok
+test_write_path_inside_run_actions_is_refused (test_sec_regressions.ReadOnlyToolsDoNotWrite.test_write_path_inside_run_actions_is_refused) ... ok
+test_write_path_on_a_read_is_refused_and_nothing_is_written (test_sec_regressions.ReadOnlyToolsDoNotWrite.test_write_path_on_a_read_is_refused_and_nothing_is_written) ... ok
+test_same_unmodelled_effect_with_reordered_args_is_caught (test_sec_regressions.UnknownOutcomeNotReSent.test_same_unmodelled_effect_with_reordered_args_is_caught) ... ok
+test_unmodelled_action_is_not_re_sent_after_unknown (test_sec_regressions.UnknownOutcomeNotReSent.test_unmodelled_action_is_not_re_sent_after_unknown) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 7.737s
+
+OK

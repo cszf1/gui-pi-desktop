@@ -1,0 +1,287 @@
+test_recipient_changed_after_approval_voids_it (test_v3_sec.ApprovalPremise.test_recipient_changed_after_approval_voids_it) ... FAIL
+test_unreadable_premise_is_said_so (test_v3_sec.ApprovalPremise.test_unreadable_premise_is_said_so) ... FAIL
+test_task_change_between_background_failure_and_foreground_retry (test_v3_sec.EverySendIsChecked.test_task_change_between_background_failure_and_foreground_retry)
+Background input is unavailable (nothing delivered); while that happens the user's task changes. The ... FAIL
+test_unchanged_foreground_retry_runs_and_is_checked (test_v3_sec.EverySendIsChecked.test_unchanged_foreground_retry_runs_and_is_checked) ... FAIL
+test_client_measured_active_time (test_v3_sec.PersonRecords.test_client_measured_active_time) ... /usr/local/lib/python3.12/json/decoder.py:338: ResourceWarning: unclosed file <_io.FileIO name=6 mode='rb' closefd=True>
+  obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/json/decoder.py:338: ResourceWarning: unclosed file <_io.FileIO name=7 mode='rb' closefd=True>
+  obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/json/decoder.py:338: ResourceWarning: unclosed file <_io.FileIO name=9 mode='rb' closefd=True>
+  obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/json/decoder.py:338: ResourceWarning: unclosed file <_io.FileIO name=10 mode='rb' closefd=True>
+  obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+FAIL
+test_expired_without_retry_is_not_asked_again_and_ends_once (test_v3_sec.PersonRecords.test_expired_without_retry_is_not_asked_again_and_ends_once) ... FAIL
+test_reset_void_then_answer_ends_once (test_v3_sec.PersonRecords.test_reset_void_then_answer_ends_once) ... FAIL
+test_takeover_rereads_and_never_replays (test_v3_sec.PersonRecords.test_takeover_rereads_and_never_replays) ... FAIL
+test_wait_is_not_active_time (test_v3_sec.PersonRecords.test_wait_is_not_active_time) ... FAIL
+test_attended_asks_the_person (test_v3_sec.ReviewFailureNeverDirect.test_attended_asks_the_person) ... FAIL
+test_unattended_is_refused (test_v3_sec.ReviewFailureNeverDirect.test_unattended_is_refused) ... FAIL
+test_explicit_disable_wins_over_endpoint (test_v3_sec.Roles.test_explicit_disable_wins_over_endpoint) ... FAIL
+test_role_calls_have_a_total_deadline (test_v3_sec.Roles.test_role_calls_have_a_total_deadline) ... /usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed file <_io.TextIOWrapper name=11 encoding='UTF-8'>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed file <_io.FileIO name=6 mode='rb' closefd=True>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed file <_io.FileIO name=7 mode='rb' closefd=True>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed file <_io.FileIO name=9 mode='rb' closefd=True>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed file <_io.FileIO name=10 mode='rb' closefd=True>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed file <_io.FileIO name=12 mode='rb' closefd=True>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed file <_io.FileIO name=13 mode='rb' closefd=True>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed <socket.socket fd=3, family=2, type=1, proto=0, laddr=('127.0.0.1', 44997)>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/email/feedparser.py:88: ResourceWarning: unclosed file <_io.FileIO name=15 mode='rb' closefd=True>
+  for ateof in reversed(self._eofstack):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+FAIL
+test_verifier_only_with_explicit_postconditions (test_v3_sec.Roles.test_verifier_only_with_explicit_postconditions) ... FAIL
+test_status_values_and_fields (test_v3_sec.StructuredStatus.test_status_values_and_fields) ... FAIL
+test_failed_read_does_not_clear_the_record (test_v3_sec.UnknownLedger.test_failed_read_does_not_clear_the_record) ... [gui-gate] driver restarted
+/workspace/work/gg-v3-sec/tests/test_v3_sec.py:144: ResourceWarning: unclosed <socket.socket fd=6, family=2, type=1, proto=0, laddr=('127.0.0.1', 45145)>
+  self.rev = _Rev("allow")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/workspace/work/gg-v3-sec/tests/test_v3_sec.py:148: ResourceWarning: unclosed file <_io.TextIOWrapper name=12 encoding='UTF-8'>
+  self.c = Modern("--task", "send the reply to Bob", *extra, person=person, reviewer_url=self.rev.url,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[gui-gate] driver restarted
+/workspace/work/gg-v3-sec/tests/test_v3_sec.py:144: ResourceWarning: unclosed <socket.socket fd=7, family=2, type=1, proto=0, laddr=('127.0.0.1', 37963)>
+  self.rev = _Rev("allow")
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/workspace/work/gg-v3-sec/tests/test_v3_sec.py:148: ResourceWarning: unclosed file <_io.TextIOWrapper name=13 encoding='UTF-8'>
+  self.c = Modern("--task", "send the reply to Bob", *extra, person=person, reviewer_url=self.rev.url,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[gui-gate] driver restarted
+ok
+/usr/local/lib/python3.12/unittest/suite.py:107: ResourceWarning: unclosed <socket.socket fd=6, family=2, type=1, proto=0, laddr=('127.0.0.1', 39909)>
+  for index, test in enumerate(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/unittest/suite.py:107: ResourceWarning: unclosed file <_io.TextIOWrapper name=12 encoding='UTF-8'>
+  for index, test in enumerate(self):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+test_idempotent_step_unlocks_after_a_successful_read (test_v3_sec.UnknownLedger.test_idempotent_step_unlocks_after_a_successful_read) ... [gui-gate] driver restarted
+FAIL
+test_non_idempotent_needs_a_person_even_after_a_read (test_v3_sec.UnknownLedger.test_non_idempotent_needs_a_person_even_after_a_read) ... [gui-gate] driver restarted
+FAIL
+test_person_confirms_then_it_is_sent (test_v3_sec.UnknownLedger.test_person_confirms_then_it_is_sent) ... [gui-gate] driver restarted
+FAIL
+test_unmodelled_action_failed_window_list_does_not_clear (test_v3_sec.UnknownLedger.test_unmodelled_action_failed_window_list_does_not_clear) ... /usr/local/lib/python3.12/collections/__init__.py:449: ResourceWarning: unclosed <socket.socket fd=3, family=2, type=1, proto=0, laddr=('127.0.0.1', 46761)>
+  result = tuple_new(cls, iterable)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/collections/__init__.py:449: ResourceWarning: unclosed file <_io.FileIO name=9 mode='rb' closefd=True>
+  result = tuple_new(cls, iterable)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/collections/__init__.py:449: ResourceWarning: unclosed file <_io.FileIO name=10 mode='rb' closefd=True>
+  result = tuple_new(cls, iterable)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/collections/__init__.py:449: ResourceWarning: unclosed <socket.socket fd=4, family=2, type=1, proto=0, laddr=('127.0.0.1', 35675)>
+  result = tuple_new(cls, iterable)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/local/lib/python3.12/collections/__init__.py:449: ResourceWarning: unclosed file <_io.TextIOWrapper name=17 encoding='UTF-8'>
+  result = tuple_new(cls, iterable)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+FAIL
+
+======================================================================
+FAIL: test_recipient_changed_after_approval_voids_it (test_v3_sec.ApprovalPremise.test_recipient_changed_after_approval_voids_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 236, in test_recipient_changed_after_approval_voids_it
+    self.assertEqual(len(e.acts("click")), 0, "approved for bob@, the window now sends to eve@")
+AssertionError: 1 != 0 : approved for bob@, the window now sends to eve@
+
+======================================================================
+FAIL: test_unreadable_premise_is_said_so (test_v3_sec.ApprovalPremise.test_unreadable_premise_is_said_so)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 259, in test_unreadable_premise_is_said_so
+    self.assertEqual(pr.get("readable"), False, pr)
+AssertionError: None != False : {}
+
+======================================================================
+FAIL: test_task_change_between_background_failure_and_foreground_retry (test_v3_sec.EverySendIsChecked.test_task_change_between_background_failure_and_foreground_retry)
+Background input is unavailable (nothing delivered); while that happens the user's task changes. The
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 113, in test_task_change_between_background_failure_and_foreground_retry
+    self.assertEqual(len(hk), 1, f"the undelivered background attempt only; got {hk}")
+AssertionError: 2 != 1 : the undelivered background attempt only; got [{'tool': 'hotkey', 'args': {'pid': 4242, 'window_id': 777, 'keys': ['ctrl', 'enter']}}, {'tool': 'hotkey', 'args': {'pid': 4242, 'window_id': 777, 'keys': ['ctrl', 'enter'], 'delivery_mode': 'foreground'}}]
+
+======================================================================
+FAIL: test_unchanged_foreground_retry_runs_and_is_checked (test_v3_sec.EverySendIsChecked.test_unchanged_foreground_retry_runs_and_is_checked)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 130, in test_unchanged_foreground_retry_runs_and_is_checked
+    self.assertEqual(len(checks), 2, "each of the two sends passed the final check")
+AssertionError: 0 != 2 : each of the two sends passed the final check
+
+======================================================================
+FAIL: test_client_measured_active_time (test_v3_sec.PersonRecords.test_client_measured_active_time)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 326, in test_client_measured_active_time
+    self.assertAlmostEqual(b["active_s"], 0.4, places=2)
+AssertionError: 0.0 != 0.4 within 2 places (0.4 difference)
+
+======================================================================
+FAIL: test_expired_without_retry_is_not_asked_again_and_ends_once (test_v3_sec.PersonRecords.test_expired_without_retry_is_not_asked_again_and_ends_once)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 340, in test_expired_without_retry_is_not_asked_again_and_ends_once
+    self.assertNotEqual(res.get("resultType"), "input_required", "the same effect was asked again")
+AssertionError: 'input_required' == 'input_required' : the same effect was asked again
+
+======================================================================
+FAIL: test_reset_void_then_answer_ends_once (test_v3_sec.PersonRecords.test_reset_void_then_answer_ends_once)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 364, in test_reset_void_then_answer_ends_once
+    self.assertEqual(len(ends), 1, ends)
+AssertionError: 0 != 1 : []
+
+======================================================================
+FAIL: test_takeover_rereads_and_never_replays (test_v3_sec.PersonRecords.test_takeover_rereads_and_never_replays)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 393, in test_takeover_rereads_and_never_replays
+    self.assertIn("Signed in as bob", json.dumps(rr.get("window")))
+AssertionError: 'Signed in as bob' not found in 'null'
+
+======================================================================
+FAIL: test_wait_is_not_active_time (test_v3_sec.PersonRecords.test_wait_is_not_active_time)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 314, in test_wait_is_not_active_time
+    self.assertIsNone(b["active_s"], "no interaction evidence: active time is missing, not the wait")
+AssertionError: 1.2 is not None : no interaction evidence: active time is missing, not the wait
+
+======================================================================
+FAIL: test_attended_asks_the_person (test_v3_sec.ReviewFailureNeverDirect.test_attended_asks_the_person)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 294, in test_attended_asks_the_person
+    self.assertEqual(len(p.asked), 1, txt(r))
+AssertionError: 0 != 1 : Clicked element [2] text "count=0".
+[gate] Window right after the action (snapshot s00000004; tokens are s00000004:N, older tokens are stale). Nothing in the tree changed since snapshot s00000002 (6 rows); its [N] are valid as s00000004:N.
+
+
+======================================================================
+FAIL: test_unattended_is_refused (test_v3_sec.ReviewFailureNeverDirect.test_unattended_is_refused)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 284, in test_unattended_is_refused
+    self.assertTrue(r.get("isError"), txt(r))
+AssertionError: None is not true : Clicked element [2] text "count=0".
+[gate] Window right after the action (snapshot s00000004; tokens are s00000004:N, older tokens are stale). Nothing in the tree changed since snapshot s00000002 (6 rows); its [N] are valid as s00000004:N.
+
+
+======================================================================
+FAIL: test_explicit_disable_wins_over_endpoint (test_v3_sec.Roles.test_explicit_disable_wins_over_endpoint)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 420, in test_explicit_disable_wins_over_endpoint
+    self.assertEqual(srv.seen, [], "GUI_GATE_ROLE_VERIFIER_ENABLE=0 must switch the verifier off")
+AssertionError: Lists differ: [1793020932.5385993] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+1793020932.5385993
+
+- [1793020932.5385993]
++ [] : GUI_GATE_ROLE_VERIFIER_ENABLE=0 must switch the verifier off
+
+======================================================================
+FAIL: test_role_calls_have_a_total_deadline (test_v3_sec.Roles.test_role_calls_have_a_total_deadline)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 435, in test_role_calls_have_a_total_deadline
+    self.assertLess(el, 9, f"check_done took {el:.1f} s")
+AssertionError: 27.022961378097534 not less than 9 : check_done took 27.0 s
+
+======================================================================
+FAIL: test_verifier_only_with_explicit_postconditions (test_v3_sec.Roles.test_verifier_only_with_explicit_postconditions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 448, in test_verifier_only_with_explicit_postconditions
+    self.assertEqual(srv.seen, [])
+AssertionError: Lists differ: [1793020960.6386955] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+1793020960.6386955
+
+- [1793020960.6386955]
++ []
+
+======================================================================
+FAIL: test_status_values_and_fields (test_v3_sec.StructuredStatus.test_status_values_and_fields)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 464, in test_status_values_and_fields
+    self.assertEqual(sc["status"], "done", sc)
+AssertionError: 'executed' != 'done'
+- executed
++ done
+ : {'effect': 'unverifiable', 'route': 'accessibility', 'diff': {'base_snapshot_id': 's00000001', 'snapshot_id': 's00000002', 'full': False, 'rows_total': 6, 'changed': [{'line': 3, 'text': '    - [2] text "count=1" [actions=[click]]'}], 'removed': ['    - [2] text "count=0" [actions=[click]]'], 'reordered': [], 'window': '4242:777'}, 'status': 'executed'}
+
+======================================================================
+FAIL: test_idempotent_step_unlocks_after_a_successful_read (test_v3_sec.UnknownLedger.test_idempotent_step_unlocks_after_a_successful_read)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 215, in test_idempotent_step_unlocks_after_a_successful_read
+    self.assertFalse(r.get("isError"), txt(r))
+AssertionError: True is not false : [gate] Not executed: the same action just had an unknown outcome (the driver exited during the call); it may already have happened, so the gate read the window instead of sending it again: check whether it took effect, then send it again only if it is still needed. The window's fresh tree is attached: pick the target from it and send the action again (no need to read the window yourself).
+[gate] Window now (nothing was executed) (snapshot s00000002; tokens are s00000002:N, older tokens are stale). Nothing in the tree changed since snapshot s00000001 (4 rows); its [N] are valid as s00000002:N.
+
+
+======================================================================
+FAIL: test_non_idempotent_needs_a_person_even_after_a_read (test_v3_sec.UnknownLedger.test_non_idempotent_needs_a_person_even_after_a_read)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 198, in test_non_idempotent_needs_a_person_even_after_a_read
+    self.assertTrue(r.get("isError"), txt(r))
+AssertionError: None is not true : Clicked element [0] button "Send".
+[gate] Window right after the action (snapshot s00000004; tokens are s00000004:N, older tokens are stale). Nothing in the tree changed since snapshot s00000002 (4 rows); its [N] are valid as s00000004:N.
+
+
+======================================================================
+FAIL: test_person_confirms_then_it_is_sent (test_v3_sec.UnknownLedger.test_person_confirms_then_it_is_sent)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 206, in test_person_confirms_then_it_is_sent
+    self.assertFalse(r.get("isError"), txt(r))
+AssertionError: True is not false : [gate] Not executed: the same action just had an unknown outcome (the driver exited during the call); it may already have happened, so the gate read the window instead of sending it again: check whether it took effect, then send it again only if it is still needed. The window's fresh tree is attached: pick the target from it and send the action again (no need to read the window yourself).
+[gate] Window now (nothing was executed) (snapshot s00000002; tokens are s00000002:N, older tokens are stale). Nothing in the tree changed since snapshot s00000001 (4 rows); its [N] are valid as s00000002:N.
+
+
+======================================================================
+FAIL: test_unmodelled_action_failed_window_list_does_not_clear (test_v3_sec.UnknownLedger.test_unmodelled_action_failed_window_list_does_not_clear)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/work/gg-v3-sec/tests/test_v3_sec.py", line 190, in test_unmodelled_action_failed_window_list_does_not_clear
+    self.assertEqual(r["structuredContent"]["status"], "blocked", txt(r))
+AssertionError: 'executed' != 'blocked'
+- executed
++ blocked
+ : set_clipboard ok delivery=background
+
+----------------------------------------------------------------------
+Ran 20 tests in 44.450s
+
+FAILED (failures=19)

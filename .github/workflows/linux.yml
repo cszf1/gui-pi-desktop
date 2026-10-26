@@ -8,7 +8,7 @@ on:
     inputs:
       test_hooks: {description: "build with test hooks (scripted person answers, for the test box only)", type: boolean, default: false}
 env:
-  GATE_REF: acaba696272bc49641e978d677bd721cb9f9ffd1  # gui-gate v0.10.2 (tag): the last standalone gui-gate release; same commit in linux.yml / windows.yml / macos.yml
+  GATE_REF: c984a4577d09c3891ee4fffb5a3f9566790196c5  # gui-gate v0.10.3 (tag): the final standalone gui-gate release; same commit in linux.yml / windows.yml / macos.yml
 permissions: {contents: write}
 jobs:
   build:

@@ -11,7 +11,41 @@
 //   - a diff arrived whose base snapshot the client never saw or lost in a compaction (rows not listed are unknown),
 //   - the context was compacted (the summary asks for a re-read anyway; the client does it),
 //   - a person acted (takeover / did it): the affected state is re-read, the original action is never replayed.
+//     gate v0.10.3 already re-reads after a person's turn (the result carries a fresh read of the target window and
+//     `reread` {focused_window, files_changed, note}); the client then reads only what the gate did not (afterPerson):
+//     no second read of a window the result already showed, no window list when the gate named the focused window
+//     and it is the target; a read + window list when the focus moved elsewhere or an older gate sent nothing.
 import type { ObsMeta } from "./context.ts";
+
+export const PERSON_ACTED = "a person acted (takeover / did it themselves)";
+
+/** gate v0.10.3 re-read after a person's turn (structuredContent.reread), read tolerantly; null: not given. */
+export type PersonReread = { focusedWindow: number | null; focusedTitle: string; files: string[]; rows: number; note: string };
+export function rereadOf(sc: any): PersonReread | null {
+  const r = sc?.reread;
+  if (!r || typeof r !== "object" || Array.isArray(r)) return null;
+  const fw = Number(r.focused_window);
+  return {
+    focusedWindow: r.focused_window !== null && r.focused_window !== undefined && Number.isInteger(fw) ? fw : null,
+    focusedTitle: String(r.focused_title ?? "").slice(0, 120),
+    files: (Array.isArray(r.files_changed) ? r.files_changed : []).map((f: any) => String(f).slice(0, 300)).filter(Boolean).slice(0, 20),
+    rows: Array.isArray(r.window) ? r.window.length : 0,
+    note: String(r.note ?? "").slice(0, 600),
+  };
+}
+
+/** What the client still has to read after a person's turn. */
+export function afterPerson(rr: PersonReread | null, resultHadRead: boolean, targetWindow: number | null):
+    { force: boolean; listWindows: boolean; why: string } {
+  if (!rr) return { force: true, listWindows: true, why: PERSON_ACTED };
+  const moved = rr.focusedWindow !== null && (targetWindow === null || rr.focusedWindow !== targetWindow);
+  if (moved)
+    return { force: true, listWindows: true,
+             why: `${PERSON_ACTED}; the focus is now on window ${rr.focusedWindow}${rr.focusedTitle ? ` "${rr.focusedTitle}"` : ""}` };
+  if (!resultHadRead) return { force: true, listWindows: rr.focusedWindow === null, why: `${PERSON_ACTED}; the gate's re-read carried no window tree` };
+  // the gate re-read the target window (attached to the result) and the focus did not move: nothing more to read
+  return { force: false, listWindows: false, why: "" };
+}
 
 export const FRESH_MS = 10_000;
 export const MAX_DIFF_CHAIN = 6;
@@ -26,6 +60,8 @@ export class ObsTracker {
   gone = new Set<string>();
   /** window -> why a full anchor read is needed */
   anchor = new Map<string, string>();
+  /** windows whose anchor read should also list the open windows (a person acted and the focus may have moved) */
+  list = new Set<string>();
   now: () => number;
   freshMs: number;
   maxChain: number;
@@ -43,6 +79,7 @@ export class ObsTracker {
     let diffs = 0;
     if (obs.kind === "full") {
       this.anchor.delete(wkey);
+      this.list.delete(wkey);
     } else {
       diffs = (prev?.diffs ?? 0) + 1;
       if (obs.base && (this.gone.has(obs.base) || !this.known.has(obs.base)))
@@ -73,8 +110,15 @@ export class ObsTracker {
   }
 
   /** Force a full re-read of a window before the next turn. */
-  force(wkey: string | undefined, why: string) {
-    if (wkey) this.anchor.set(wkey, why);
+  force(wkey: string | undefined, why: string, listWindows = false) {
+    if (!wkey) return;
+    this.anchor.set(wkey, why);
+    if (listWindows) this.list.add(wkey);
+  }
+
+  /** Should the anchor read of this window also list the open windows? */
+  wantsList(wkey: string | undefined): boolean {
+    return !!wkey && this.list.has(wkey);
   }
 
   anchorReason(wkey: string | undefined): string | null {

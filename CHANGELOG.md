@@ -1,8 +1,16 @@
 # Changelog
 
-## 0.3.2 — 2026-10-26（客户端：按审核 review-2026-10-26-v2 修订；未打 tag、未发版）
+## 0.3.2 — 2026-10-26（打包 gui-gate v0.10.3；客户端按审核 review-2026-10-26-v2 修订）
 
-打包的 gate 仍是 gui-gate v0.10.2（GATE_REF acaba69 不变）；对即将发布的 v0.10.3 结构化执行状态做了向前兼容的适配。逐条清单：docs/review-v3-checklist-desktop.md。只做了单元 / 脚本验证，没有真实模型、没有在线测试。
+打包的 gate 是 **gui-gate v0.10.3**（最后一版独立 MCP；三个工作流的 `GATE_REF` = c984a45）。逐条清单：docs/review-v3-checklist-desktop.md。只做了单元 / 脚本验证，没有真实模型、没有在线测试（docs/test-log.md）。
+
+对齐 gate v0.10.3 的最终字段名（扩展 status.ts / progress.ts / guard.ts / observe.ts、壳 rpc.rs / human.rs / popup.js；测试 packages/gui-pi/test/gate0103.test.ts、gpd-core `gate_0103_holds_in_the_timeline`、`approve_shows_the_premise_and_an_unknown_earlier_send`）：
+- `completed_steps`（下标数组；数字仍按旧的“已跑步数”读）、`next_step`（未跑 / 结果未知的那一步）、`executed`（true / false / "unknown"，只会让判断更保守）、`continuation_id`、`loop_state`（switch_strategy / blocked_repeat 提示换方法，help_or_stop 提示求助或停止）、`postcondition {status: verified | unverifiable | reread | none}`（只有 verified 算环境证据）；早先客户端自定的别名照样接受。
+- 账本与前提：`gate.tier = premise`（人批准时看到的收件人 / 金额 / 正文 / 文件版本在发送前变了：批准作废、什么都没发，重发会再问人；不算拒绝）、`gate.decision = unknown_hold`（之前发过、结果未知、不能发生两次、没人能确认：客户端也永不重发，进“约束”，提示告诉用户可能已经发生）、`review_unavailable`（需要独立审核但审核没回、也没人可问：什么都没发，不算批准也不算拒绝）。三种都有模型提示、过程状态条目和时间线说明。
+- 批准弹窗显示 gate 绑定的前提（`_meta.premise.rows`：“按现在这样批准，变了会再问你”）；前提读不到时明说“gate 读不到要操作的内容”；`unknown_outcome` 时提醒“这一步之前发过、可能已经发生”。
+- 人接管 / 替做之后用 gate 的 `reread`（focused_window、files_changed）去重：结果里已带目标窗口的新读、焦点没变 → 客户端不再重读也不再列窗口；焦点换了 → 读并列窗口；旧 gate 没有 reread → 照旧读 + 列窗口。人改过的文件记进任务事实。
+- `person_request` / `person_request_end` 是 gate 的日志事件（每个问题一条记录、一个结束），不在工具结果里；客户端对应的是 human.jsonl（gui-pi-human/2），gate 的 bench/human_pilot.py 从 v0.10.3 起两种都读。
+- docs/research/：外部审核原文、分析脚本、gui-pi5 / CI 截图、修复前基线日志、实验总结（清单与打码说明见 docs/research/README.md）。
 
 - 任务事实：保存带版本和来源的**用户消息序列**（首个请求和每条更正；initial / task_file / input / session），权威记录不截短；去掉 4000 字上限和“只存第一次”；压缩回退把分支上所有 user 消息全文补进去（不再只取首条前 2000 字）；摘要展示超出预算时才截中间几条并写明。
 - 事实分三类：工具证据 / 模型备注 / 检查（check_done 的“没缺口”是模型判断，不是环境证明）。

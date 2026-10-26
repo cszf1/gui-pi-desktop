@@ -1,0 +1,4 @@
+--prepared:/Users/runner/Applications/gui-pi-desktop.app/Contents/Resources/resources/CuaDriver.app/Contents/MacOS/cua-cursor-theme
+--validated:/Users/runner/Applications/gui-pi-desktop.app/Contents/Resources/resources/CuaDriver.app/Contents/MacOS/cua-cursor-theme
+/Users/runner/Applications/gui-pi-desktop.app/Contents/Resources/resources/CuaDriver.app: valid on disk
+/Users/runner/Applications/gui-pi-desktop.app/Contents/Resources/resources/CuaDriver.app: satisfies its Designated Requirement

@@ -1,0 +1,6 @@
+Cua Driver sends content-free product telemetry by default. Run `cua-driver telemetry disable` to stop it; `cua-driver telemetry status` shows the current setting.
+{
+  "daemon_running": false,
+  "reason": "No CuaDriver daemon is running under the driver's own identity (com.trycua.driver), so its real TCC status can't be read from this process. Run `cua-driver permissions grant` to grant + verify and start the daemon, then re-run this command.",
+  "status": "unknown"
+}
