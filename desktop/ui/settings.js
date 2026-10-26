@@ -1,6 +1,8 @@
 const { invoke } = window.__TAURI__.core;
 const MAIN_P = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"];
 const GATE_P = ["chat", "responses", "anthropic", "gemini", "systemone"];
+// gpd-core config::CLIENT_SIDE_ROLES: off in the gate unless opted in (Settings in_gate_roles)
+const CLIENT_SIDE = ["planner", "search", "compact"];
 let state = null;
 const el = (tag, attrs = {}, kids = []) => { const e = document.createElement(tag); Object.assign(e, attrs); kids.forEach((k) => e.appendChild(k)); return e; };
 const row = (label, input) => el("div", { className: "row" }, [el("label", { textContent: label }), input]);
@@ -84,7 +86,15 @@ function render() {
       s.roles[r] = mode.value === "custom" ? { mode: "custom", model: (s.roles[r] && s.roles[r].model) || emptyModel() } : { mode: mode.value };
       draw();
     };
-    roles.append(row(r, mode), sub); draw();
+    // planner / search / compact: the gate's own version stays off unless opted in here (Off always wins)
+    let ctl = mode;
+    if (CLIENT_SIDE.includes(r)) {
+      s.in_gate_roles = s.in_gate_roles || [];
+      const cb = el("input", { type: "checkbox", checked: s.in_gate_roles.includes(r), title: "Run the gate's own " + r + " (off by default)" });
+      cb.onchange = () => { s.in_gate_roles = s.in_gate_roles.filter((x) => x !== r); if (cb.checked) s.in_gate_roles.push(r); };
+      ctl = el("div", {}, [mode, el("label", { className: "muted", textContent: " in the gate " }), cb]);
+    }
+    roles.append(row(r, ctl), sub); draw();
   }
   if (Object.values(s.roles).some((x) => x.mode !== "off")) document.getElementById("advanced").open = true;
   document.getElementById("timeout").value = s.human_timeout_s;

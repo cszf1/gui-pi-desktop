@@ -18,3 +18,6 @@ description: What each specific "[gate]" reply and "[client: ...]" note means an
 | "send it again ON ITS OWN" | a step inside run_actions needs a person | resend that single step outside run_actions |
 | "stop here and tell the user" | too many refusals | stop; explain what you wanted to do and why |
 | client note "diff against snapshot X, which is no longer in context" | the base tree was dropped | read the window before using any token not shown |
+| client note "PLATFORM - ..." (accessibility bus gone, UAC prompt, locked session, no desktop, admin window) | the desktop itself is not reachable for you | do not retry; read once to see if it is back, else request_human takeover or stop and report |
+| client note "a fresh full read ... before this turn" | the client re-anchored the window (long diff chain, lost base, compaction, a person acted) | use only the tokens of this read |
+| client note "continuation id ..." | names the gate's decision for that step | nothing to do unless a later reply asks for it; it approves nothing |

@@ -197,13 +197,25 @@ pub fn gate_env(s: &Settings, keys: &dyn KeyStore, p: &Paths) -> Vec<(String, St
     // the user's own ~/.config/gui-gate/reviewer.env is never read
     gate_model_env("GUI_GATE_REVIEWER", &s.reviewer, keys.get(&slot_reviewer()), &mut env);
     env.push(("GUI_GATE_REVIEWER_ENV".into(), p.data.join("no-reviewer.env").display().to_string()));
+    // Roles: an explicit per-role switch every time (GUI_GATE_ROLE_<NAME>_ENABLE=0|1), never a group switch
+    // (GUI_GATE_ROLES_ENABLE). A role that is off gets ENABLE=0 and NO endpoint variables, so it stays off whatever
+    // group switch (GUI_GATE_097) or gate default applies; planner / search / compact are off in the gate unless the
+    // user opted in (Settings::role_enabled). This is configuration only: it relies on no gate internals.
     for r in ROLES {
         let up = r.to_uppercase();
+        if !s.role_enabled(r) {
+            env.push((format!("GUI_GATE_ROLE_{up}_ENABLE"), "0".into()));
+            continue;
+        }
         match s.effective_role(r, &|slot| keys.has(slot)) {
-            EffRole::Off => {}
+            EffRole::Off => {
+                env.push((format!("GUI_GATE_ROLE_{up}_ENABLE"), "0".into()));
+                continue;
+            }
             EffRole::Reviewer => env.push((format!("GUI_GATE_ROLE_{up}"), "reviewer".into())),
             EffRole::Model { model, key_slot } => gate_model_env(&format!("GUI_GATE_ROLE_{up}"), &model, keys.get(&key_slot), &mut env),
         }
+        env.push((format!("GUI_GATE_ROLE_{up}_ENABLE"), "1".into()));
     }
     if s.gate_097 {
         env.push(("GUI_GATE_097".into(), "1".into()));
@@ -322,6 +334,10 @@ mod tests {
         assert_eq!(gate("GUI_GATE_REVIEWER_PROTOCOL").as_deref(), Some("systemone"));
         assert_eq!(gate("GUI_GATE_ROLE_GROUNDER").as_deref(), Some("reviewer"));
         assert!(gate("GUI_GATE_ROLE_PLANNER").is_none() && gate("GUI_GATE_ROLE_PLANNER_URL").is_none());
+        // explicit per-role switches, never the group switch
+        assert_eq!(gate("GUI_GATE_ROLE_GROUNDER_ENABLE").as_deref(), Some("1"));
+        assert_eq!(gate("GUI_GATE_ROLE_PLANNER_ENABLE").as_deref(), Some("0"));
+        assert!(gate("GUI_GATE_ROLES_ENABLE").is_none());
         assert_eq!(pi("GUI_PI_TASK").as_deref(), Some("rename the file"));
         for (_, content) in &l.files {
             assert!(!content.contains("secret"), "{content}");
@@ -350,6 +366,7 @@ mod tests {
     fn pi_never_sees_the_gate_keys_and_the_gate_never_sees_pi_s() {
         let (mut s, k, p, _) = setup();
         s.roles.insert("planner".into(), RoleCfg::Custom { model: ModelCfg { base_url: "https://p.example.com".into(), ..Default::default() } });
+        s.in_gate_roles = vec!["planner".into()]; // opted in to the gate's own planner (off by default since 0.3.2)
         k.set("role.planner", "sk-planner-secret-0003").unwrap();
         let l = build(&s, &k, &p, "x", None, Some(("/run/x.sock", "tok"))).unwrap();
         assert!(!l.gate_env_in_pi);
@@ -397,6 +414,7 @@ mod tests {
         use std::sync::{mpsc::channel, Arc, Mutex};
         let (mut s, k, p, dir) = setup();
         s.roles.insert("planner".into(), RoleCfg::Custom { model: ModelCfg { base_url: "https://p.example.com".into(), ..Default::default() } });
+        s.in_gate_roles = vec!["planner".into()]; // opted in to the gate's own planner (off by default since 0.3.2)
         k.set("role.planner", "sk-fake-planner-key-777").unwrap();
         let tf = dir.join("task.txt");
         let l = build(&s, &k, &p, "rename the file", Some(&tf), Some(("/run/x.sock", "tok-ipc-secret-123"))).unwrap();

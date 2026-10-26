@@ -4,6 +4,9 @@ use std::collections::BTreeMap;
 
 /// The gate's optional model roles (GUI_GATE_ROLE_<NAME>_*), all off by default.
 pub const ROLES: &[&str] = &["feasibility", "planner", "verifier", "judge", "search", "compact", "grounder"];
+/// Roles whose in-gate version stays OFF even when configured, unless the user opts in (`in_gate_roles`): they are
+/// candidates to move into the client, and no net benefit of the gate's version is shown yet (review 2026-10-26 v2 §7).
+pub const CLIENT_SIDE_ROLES: &[&str] = &["planner", "search", "compact"];
 /// Protocols the main model can speak (Pi's `api` names).
 pub const MAIN_PROTOCOLS: &[&str] = &["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"];
 /// Protocols the gate's reviewer / roles can speak (gui-gate GUI_GATE_REVIEWER_PROTOCOL).
@@ -57,6 +60,9 @@ pub struct Settings {
     /// look up the latest release at start and show an "update available" notice (never installs anything)
     #[serde(default = "yes")]
     pub update_check: bool,
+    /// planner / search / compact: run the gate's own version (opt-in; empty = all three off in the gate)
+    #[serde(default)]
+    pub in_gate_roles: Vec<String>,
 }
 
 fn default_timeout() -> u32 {
@@ -75,6 +81,7 @@ impl Default for Settings {
             human_timeout_s: 120,
             gate_097: true,
             update_check: true,
+            in_gate_roles: vec![],
         }
     }
 }
@@ -188,10 +195,25 @@ impl Settings {
                 }
             }
         }
+        for r in &self.in_gate_roles {
+            if !CLIENT_SIDE_ROLES.contains(&r.as_str()) {
+                errs.push(format!("Advanced: only {} can be switched to the gate's own version ({r} cannot)", CLIENT_SIDE_ROLES.join(", ")));
+            }
+        }
         if self.human_timeout_s < MIN_HUMAN_TIMEOUT {
             errs.push(format!("Person timeout must be at least {MIN_HUMAN_TIMEOUT} s"));
         }
         errs
+    }
+
+    /// Whether the gate may run this role. Precedence (highest first): the role switched Off -> off, whatever group
+    /// switch (GUI_GATE_097, GUI_GATE_ROLES_ENABLE) or configured endpoint says; planner / search / compact -> off
+    /// unless opted in (`in_gate_roles`); otherwise on when configured.
+    pub fn role_enabled(&self, name: &str) -> bool {
+        match self.roles.get(name) {
+            None | Some(RoleCfg::Off) => false,
+            Some(_) => !CLIENT_SIDE_ROLES.contains(&name) || self.in_gate_roles.iter().any(|r| r == name),
+        }
     }
 
     /// A role with inheritance applied. `has_key(slot)` tells whether a custom role has its own key.
@@ -318,6 +340,34 @@ mod tests {
         assert!(matches!(s.effective_role("judge", &|_| true), EffRole::Model { ref model, .. } if model.protocol == "anthropic"));
         s.roles.insert("grounder".into(), RoleCfg::Custom { model: ModelCfg { base_url: "http://g.example.com".into(), ..Default::default() } });
         assert!(s.validate(&|_| true).iter().any(|e| e.contains("Advanced / role grounder") && e.contains("https")));
+    }
+
+    #[test]
+    fn explicit_off_wins_and_client_side_roles_are_off_in_the_gate_by_default() {
+        let mut s = filled();
+        for r in ROLES {
+            assert!(!s.role_enabled(r), "{r}: off by default");
+        }
+        for r in ROLES {
+            s.roles.insert(r.to_string(), RoleCfg::Main);
+        }
+        for r in ROLES {
+            assert_eq!(s.role_enabled(r), !CLIENT_SIDE_ROLES.contains(r), "{r}");
+        }
+        s.in_gate_roles = vec!["compact".into()];
+        assert!(s.role_enabled("compact") && !s.role_enabled("planner") && !s.role_enabled("search"));
+        // explicit off beats the opt-in and the configured endpoint
+        s.roles.insert("compact".into(), RoleCfg::Off);
+        assert!(!s.role_enabled("compact"));
+        s.roles.insert("verifier".into(), RoleCfg::Off);
+        assert!(!s.role_enabled("verifier"));
+        assert!(s.validate(&|_| true).is_empty());
+        s.in_gate_roles = vec!["verifier".into()];
+        assert!(s.validate(&|_| true).iter().any(|e| e.contains("verifier cannot")));
+        // older settings files (no in_gate_roles) still load
+        let mut v = serde_json::to_value(filled()).unwrap();
+        v.as_object_mut().unwrap().remove("in_gate_roles");
+        assert_eq!(Settings::load(&v.to_string()).unwrap().in_gate_roles, Vec::<String>::new());
     }
 
     #[test]

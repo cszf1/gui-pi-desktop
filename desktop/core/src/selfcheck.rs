@@ -360,18 +360,12 @@ pub fn gather_with(secret_service: bool, ctx: &Context) -> Probe {
         return Probe { os, secret_service, mac: Some(gather_macos(ctx.mac_driver.as_deref())), ..Default::default() };
     }
     let mut env = HashMap::new();
-    for k in ["XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS"] {
+    for k in LINUX_ENV {
         if let Ok(v) = std::env::var(k) {
             env.insert(k.to_string(), v);
         }
     }
-    let has_bus = env.contains_key("DBUS_SESSION_BUS_ADDRESS");
-    let dbus_ok = has_bus && run("dbus-send", &["--session", "--print-reply", "--dest=org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.ListNames"]).is_some();
-    let atspi_bus = env.get("AT_SPI_BUS_ADDRESS").cloned().filter(|s| !s.is_empty()).or_else(|| {
-        if !has_bus { return None; }
-        run("dbus-send", &["--session", "--print-reply", "--dest=org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus.GetAddress"])
-            .and_then(|o| o.split('"').nth(1).map(String::from)).filter(|s| !s.is_empty())
-    });
+    let (dbus_ok, atspi_bus) = buses(&env);
     let glibc = run("getconf", &["GNU_LIBC_VERSION"]).and_then(|s| s.split_whitespace().nth(1).map(String::from));
     let webkit = run("ldconfig", &["-p"]).or_else(|| run("/sbin/ldconfig", &["-p"])).and_then(|o| {
         o.lines().find(|l| l.contains("libwebkit2gtk-4.1.so")).and_then(|l| l.split("=>").nth(1)).map(|p| {
@@ -380,6 +374,46 @@ pub fn gather_with(secret_service: bool, ctx: &Context) -> Probe {
         })
     });
     Probe { os, env, atspi_bus, dbus_ok, secret_service, glibc, webkit, ..Default::default() }
+}
+
+/// The session variables the Linux self-check reads.
+pub const LINUX_ENV: &[&str] = &["XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS"];
+
+/// A `unix:path=...` bus address whose socket file is gone (the bus died; the variable is stale). Abstract and TCP
+/// addresses cannot be checked this way and count as present.
+pub fn stale_unix_bus(addr: &str) -> bool {
+    addr.split(';').next().unwrap_or("").strip_prefix("unix:").map(|rest| {
+        rest.split(',').find_map(|kv| kv.strip_prefix("path=")).map(|p| !std::path::Path::new(p).exists()).unwrap_or(false)
+    }).unwrap_or(false)
+}
+
+/// DBus session bus and AT-SPI bus, from the given environment: (dbus answered, AT-SPI address). Used at start and
+/// again when the extension reports the accessibility bus lost mid-task (Re-check on the settings page). A lost or
+/// stale bus reads as unreachable, never as present.
+pub fn buses(env: &HashMap<String, String>) -> (bool, Option<String>) {
+    let bus = env.get("DBUS_SESSION_BUS_ADDRESS").cloned().filter(|s| !s.trim().is_empty() && !stale_unix_bus(s));
+    let dbus_ok = bus.as_ref().map(|b| run_bus(b, &["--session", "--print-reply", "--dest=org.freedesktop.DBus", "/org/freedesktop/DBus",
+                                                     "org.freedesktop.DBus.ListNames"]).is_some()).unwrap_or(false);
+    let atspi = env.get("AT_SPI_BUS_ADDRESS").cloned().filter(|s| !s.is_empty() && !stale_unix_bus(s)).or_else(|| {
+        let b = bus.as_ref().filter(|_| dbus_ok)?;
+        run_bus(b, &["--session", "--print-reply", "--dest=org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus.GetAddress"])
+            .and_then(|o| o.split('"').nth(1).map(String::from)).filter(|s| !s.is_empty() && !stale_unix_bus(s))
+    });
+    (dbus_ok, atspi)
+}
+
+/// dbus-send against an explicit session bus address (the given environment, not this process's), 5 s at most.
+fn run_bus(addr: &str, args: &[&str]) -> Option<String> {
+    let mut env: Vec<(String, String)> = crate::launch::system_env(std::env::vars()).into_iter().collect();
+    env.retain(|(k, _)| k != "DBUS_SESSION_BUS_ADDRESS");
+    env.push(("DBUS_SESSION_BUS_ADDRESS".into(), addr.into()));
+    let mut c = Command::new("dbus-send");
+    c.args(["--reply-timeout=5000"]).args(args).env_clear().envs(env).stdin(std::process::Stdio::null());
+    let o = c.output().ok()?;
+    if !o.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
 /// True when nothing blocks starting a task.
@@ -437,6 +471,34 @@ mod tests {
         assert!(cs.iter().find(|c| c.id == "glibc").unwrap().message.contains("2.31"));
         assert_eq!(ver("2.39"), Some((2, 39)));
         assert_eq!(ver("x"), None);
+    }
+
+    #[test]
+    fn a_lost_dbus_or_atspi_bus_reads_as_unreachable_and_blocks_start() {
+        // the session bus socket is gone (bus died, variable stale) and AT-SPI points at a dead socket
+        let dir = std::env::temp_dir().join(format!("gpd-bus-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let gone = dir.join("bus-gone");
+        let env: HashMap<String, String> = [("DISPLAY", ":0".to_string()), ("XDG_SESSION_TYPE", "x11".into()),
+            ("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={}", gone.display())),
+            ("AT_SPI_BUS_ADDRESS", format!("unix:path={},guid=abc", gone.display()))].into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        assert!(stale_unix_bus(&env["DBUS_SESSION_BUS_ADDRESS"]));
+        assert!(!stale_unix_bus("unix:abstract=/tmp/dbus-x,guid=1"), "abstract sockets cannot be checked: present");
+        assert!(!stale_unix_bus("tcp:host=127.0.0.1,port=1"));
+        let (dbus_ok, atspi) = buses(&env);
+        assert!(!dbus_ok && atspi.is_none());
+        let mut p = good();
+        p.env = env;
+        p.dbus_ok = dbus_ok;
+        p.atspi_bus = atspi;
+        let cs = evaluate(&p);
+        assert_eq!((level(&cs, "dbus"), level(&cs, "atspi")), ("fail", "fail"));
+        assert!(!can_start(&cs));
+        // a socket file that exists but nothing answers: dbus-send fails (or is not installed): still unreachable
+        std::fs::write(&gone, b"").unwrap();
+        let (dbus_ok, _) = buses(&p.env);
+        assert!(!dbus_ok);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

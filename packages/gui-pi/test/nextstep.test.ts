@@ -21,7 +21,7 @@ test("parseNextStep accepts only the three observe values", () => {
 test("next step: tree, tree+screenshot, none, extra_reason; decision ids logged; never offered to the model", async () => {
   const h = await load({ tools: ["get_window_state", "click", NEXT_STEP_TOOL, "gate_reset"],
     results: { [NEXT_STEP_TOOL]: [NS("tree", false, "d-1"), NS("tree+screenshot", false, "d-2"), NS("none", false, "d-3"), NS("none", true, "d-4")],
-               get_window_state: [read(42, 7, "s0"), read(42, 7, "s1"), read(42, 7, "s2", true)] } });
+               get_window_state: [read(42, 7, "s0"), read(42, 7, "s1"), read(42, 7, "s2", true)] } }, { GUI_PI_FRESH_MS: "0" });
   assert.ok(!h.pi.tools.has(NEXT_STEP_TOOL) && !h.pi.tools.has("gate_reset"), "client-only tools are not Pi tools");
   await h.pi.call("get_window_state", { pid: 42, window_id: 7 }); // focus = 42:7
   // 1: tree

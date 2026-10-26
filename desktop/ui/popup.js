@@ -6,6 +6,10 @@
 // No answer before the bar runs out = timed out; closing the window = cancelled. Both are "no answer": not a refusal
 // by the person, but the step is still not done.
 // Only the first answer counts (the shell ignores any later one).
+// Person metrics (gui-pi-human/2): the shell times how long the popup was up (wait_s). This page reports only what it
+// can prove of the person's own activity: from the first input inside the popup (key, click, typing, scrolling,
+// pointer movement) to the answer. No input before the answering click -> "answer_only"; none at all -> "none".
+// Waiting is never reported as active time; a takeover's work happens in other windows and is not measured here.
 const { invoke } = window.__TAURI__.core;
 const q = JSON.parse(decodeURIComponent(location.hash.slice(1)));
 const v = q.view || { type: "approve", message: q.message, buttons: [{ choice: "no", label: "Deny" }, { choice: "yes", label: "Allow" }] };
@@ -22,16 +26,35 @@ const list = (label, items) => {
 const btns = $("btns");
 const text = $("text");
 let sent = false;
+let firstInput = null;
+let lastInput = null;
+let moves = 0;
+const evidence = (e) => {
+  if (sent) return;
+  if (e.type === "pointermove" && ++moves < 3) return;  // a pointer merely passing over is not evidence yet
+  const t = Date.now();
+  if (firstInput === null) firstInput = t;
+  lastInput = t;
+};
+for (const ev of ["keydown", "pointerdown", "input", "wheel", "pointermove"]) document.addEventListener(ev, evidence, { capture: true, passive: true });
 const send = (choice, t) => {
   if (sent) return;
+  const now = Date.now();
+  // the answering click itself is one pointerdown just before this call: it proves the answer, not time spent
+  const before = firstInput !== null && now - firstInput > 300;
+  const answered = choice !== "timeout";
+  const active_ms = answered ? (before ? now - firstInput : null) : (firstInput !== null && lastInput > firstInput ? lastInput - firstInput : null);
+  const ev = active_ms !== null ? "input" : firstInput !== null ? "answer_only" : "none";
   sent = true;
   document.querySelectorAll("button").forEach((b) => (b.disabled = true));
-  invoke("popup_answer", { choice, text: t ?? null });
+  invoke("popup_answer", { choice, text: t ?? null, activeMs: active_ms, evidence: ev, kind: q.kind || v.kind || null });
 };
 const button = (label, cls, fn, parent = btns, choice) => { const b = el("button", cls, label); b.onclick = fn; if (choice) b.dataset.choice = choice; parent.appendChild(b); return b; };
 
 if (v.type === "approve") {
   fact("What", v.object); fact("Scope", v.scope); fact("If you allow", v.consequence); fact("Why the gate asks", v.reason);
+  if ((v.missing || []).length) facts.appendChild(el("div", "muted", `The gate did not say: ${v.missing.join(", ")}. If you are not sure what this does, deny.`));
+  if (v.only) facts.appendChild(el("div", "fact", v.only));
   button("Deny", "", () => send("no"), btns, "no");
   button("Allow", "primary", () => send("yes"), btns, "yes");
 } else if (v.type === "clarify") {
@@ -54,12 +77,14 @@ if (v.type === "approve") {
   } else button("Don't answer", "", () => send("no"), btns, "no");
 } else if (v.type === "takeover") {
   list("Please do this yourself:", v.steps);
+  if (v.more_steps) facts.appendChild(el("div", "muted", `(${v.more_steps} more steps not shown; the gate sent more than the minimal ones)`));
   facts.appendChild(el("div", "muted", `${v.paused || ""} ${v.note || ""}`));
   button("I won't do it", "", () => send("no"), btns, "no");
   button("Done", "primary", () => send("yes"), btns, "yes");
 } else {
-  list("What the agent tried:", v.tried);
+  list(v.tried_source === "agent log" ? "What the agent tried (from its log):" : "What the agent tried:", v.tried);
   fact("Why it is stuck", v.reason);
+  if (v.choices) facts.appendChild(el("div", "muted", v.choices));
   text.style.display = "block"; text.placeholder = "A hint for the agent";
   button("Give a hint", "", () => send("no", text.value), btns, "no");
   button("I did it for you", "primary", () => send("yes"), btns, "yes");

@@ -8,7 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use gpd_core::config::{all_slots, slot_main, slot_reviewer, slot_role, EffRole, Settings, ROLES};
-use gpd_core::human::{self, Outcome, Pending, Popup, Request, Service};
+use gpd_core::human::{self, Activity, Outcome, Pending, PopupEx, Request, Service};
 use gpd_core::keys::{preview, store_notice, KeyStore, MemoryStore, SERVICE};
 use gpd_core::launch::{self, Paths, Redactor};
 use gpd_core::proc::{self, Agent, AgentEvent, ExitReason, OnEvent};
@@ -225,13 +225,15 @@ async fn test_model(state: tauri::State<'_, AppState>, slot: String) -> Result<V
 }
 
 // ------------------------------------------------------------------ popups
-/// Show one popup window and block until the person answers, closes it, the app quits, or `seconds` pass.
-fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> Outcome {
+/// Show one popup window and block until the person answers, closes it, the app quits, or `seconds` pass. Returns
+/// what the person did and what the popup measured of their activity (wait_s is timed by the service; active_s only
+/// from input evidence inside the popup).
+fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> (Outcome, Activity) {
     let state = app.state::<AppState>();
     let pending = state.pending.clone();
     let label = format!("popup-{}-{}", POPUP_SEQ.fetch_add(1, Ordering::SeqCst),
                         req.id.chars().filter(|c| c.is_ascii_alphanumeric()).take(16).collect::<String>());
-    let Some(rx) = pending.open(&label) else { return Outcome::Unavailable };
+    let Some(rx) = pending.open(&label) else { return (Outcome::Unavailable, Activity::default()) };
     // one shared component for the four result types (approve / clarify / takeover / help)
     let payload = json!({"kind": req.kind, "message": req.message, "seconds": seconds, "view": human::view(req)});
     let url = format!("popup.html#{}", urlencode(&payload.to_string()));
@@ -292,6 +294,7 @@ fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> Outcome {
         });
     }
     let out = pending.wait(&label, rx, seconds);
+    let act = pending.take_activity(&label);
     if let Some(win) = win {
         let _ = win.destroy();
     }
@@ -301,7 +304,7 @@ fn show_popup(app: &AppHandle, req: &Request, seconds: f64) -> Outcome {
     if headless() {
         println!("{}", json!({"kind": "human", "text": format!("{} -> {word}", req.kind), "refused": refused}));
     }
-    out
+    (out, act)
 }
 
 fn urlencode(s: &str) -> String {
@@ -328,9 +331,12 @@ fn popup_fit(window: tauri::WebviewWindow, height: f64, need: Option<f64>, seen:
     ok
 }
 
-/// The popup's buttons call this. Only the first answer for a popup counts.
+/// The popup's buttons call this. Only the first answer for a popup counts. `active_ms` / `evidence`: what the popup
+/// measured of the person's own input (human::Activity); nothing reported = missing, never the waiting time.
 #[tauri::command]
-fn popup_answer(window: tauri::WebviewWindow, state: tauri::State<AppState>, choice: String, text: Option<String>) -> bool {
+fn popup_answer(window: tauri::WebviewWindow, state: tauri::State<AppState>, choice: String, text: Option<String>,
+                active_ms: Option<f64>, evidence: Option<String>, kind: Option<String>) -> bool {
+    state.pending.note_activity(window.label(), Activity::from_popup(kind.as_deref().unwrap_or(""), active_ms, evidence.as_deref()));
     let o = match choice.as_str() {
         "yes" => Outcome::Yes,
         "no" => Outcome::No(text.unwrap_or_default()),
@@ -344,9 +350,10 @@ fn popup_answer(window: tauri::WebviewWindow, state: tauri::State<AppState>, cho
 fn start_human_service(app: &AppHandle) -> Result<(Arc<Service>, (String, String)), String> {
     let token = human::new_token();
     let a = app.clone();
-    let popup: Popup = Arc::new(move |req, secs| show_popup(&a, req, secs));
-    let svc = Service::new(token.clone(), popup);
-    // per-question and per-task person metrics (gui-pi-human/1) for bench/human_pilot.py; nothing more is shown
+    let popup: PopupEx = Arc::new(move |req, secs| show_popup(&a, req, secs));
+    let svc = Service::new_ex(token.clone(), popup);
+    // per-question and per-task person metrics (gui-pi-human/2: wait_s, active_s with evidence) for
+    // bench/human_pilot.py; nothing more is shown
     let logs = data_dir(app).join("logs");
     private_dir(&logs);
     let hl = Mutex::new(std::fs::OpenOptions::new().create(true).append(true).open(logs.join("human.jsonl")).ok());

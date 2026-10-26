@@ -1,6 +1,6 @@
 # gui-pi-desktop 设计文档
 
-版本 0.3（2026-10-25，按外部审阅 §4/§5/§7 修订；对应 gui-gate v0.10.1 的新接口，兼容 v0.10.0；变更见 CHANGELOG.md）。范围：桌面版 computer-use agent，Linux 先做，然后 Windows，最后 macOS。
+版本 0.3.2（2026-10-26，按第二轮外部审阅 review-2026-10-26-v2 的客户端部分修订，逐条清单见 docs/review-v3-checklist-desktop.md；0.3 按第一轮审阅 §4/§5/§7 修订；打包 gui-gate v0.10.2，已按向前兼容方式适配即将发布的 v0.10.3 结构化执行状态（§11）；变更见 CHANGELOG.md）。范围：桌面版 computer-use agent，Linux 先做，然后 Windows，最后 macOS。
 
 一句话：**Tauri 壳 + Pi 1.4.0（@earendil-works/pi-coding-agent，RPC 模式，packaging/pi 锁定）+ Pi 扩展 gui-pi（TypeScript）+ gui-gate（Rust 门控）+ cua-driver 0.38.0（固定版本）**，一个安装包装好就能用。
 
@@ -14,7 +14,7 @@
 2. 每一步 GUI 动作都先过 gui-gate。门的安全核心（风险规则、授权、独立审核模型、执行）只在 Rust 里，agent 无法放行自己。防护对象是**合作但会犯错的 agent**，不是恶意 agent（见 §12 威胁模型）。
 3. 需要人的时候弹原生窗口：批准/拒绝、回答问题、接管（你来做完再点继续）、卡住求助。拒绝、取消、超时、关窗、无人可问一律按拒绝，并记录原因。
 4. 门的每一种返回动作都能真实触发，都有端到端测试。
-5. 和基线比：v0.9.9 在 gui-pi3 上 OSWorld-Verified 部分结果 137/255 有效题成功（53.7%）。
+5. 和基线比（口径见 §9）：最新一次 OSWorld-Verified 自定义原生环境运行是 185/361 = 51.25%（计划口径，infra 和缺失计失败）、185/332 = 55.72%（有效口径），28 个 infra、1 个未运行；自定义环境，不能和官方排行榜直接比较；这次没有对照组，不能用来证明门控的贡献。此前写的“137/255（53.7%）部分结果”已过时。
 
 不做：
 
@@ -154,10 +154,22 @@ Pi 只有在自带 read/bash 工具启用时才把 skill 列进系统提示词�
    - 没有可解析基底的旧式 diff：保留到该窗口上一次完整读为止。
    - `removed` / `reordered` 在结果到达时就写成显式说明（哪些行没了、哪些行重新编号、旧 token 不再可靠）。
 3. **旧观察摘要**：不在任何窗口当前链上的旧观察，换成一行摘要（标题、snapshot、行数），去掉截图；动作本身的文字（和客户端说明）保留，限长。
-4. **截图**：每张图到达时得到一个 id（`img-N`，紧跟在图后的一行文字里），原始字节（JPEG q60，不缩放、不重编码）写进会话目录下的私有目录（`gui-pi-images/<session>/`，目录 0700、文件 0600）。上下文里保留：每个窗口最新一张（最多 3 个窗口）+ 模型用 `pin_evidence {id, label}` 固定的证据图（最多 3 张，可 `unpin`；固定列表用 `appendEntry("gui-pi-pins")` 保存，压缩和重启后恢复）+ 最近一次 `recall_image` 的结果。其余图片换成一行“img-N 已移出上下文，recall_image 可取回”。
-5. **任务事实**（`src/facts.ts`）：程序原文保存，不由模型重新概括——用户原话、带来源的事实（`note_fact` 记的，或工具确认的，如 check_done 没有缺口）、人的回答和每次拒绝结果、gate 拒绝过的效果、本次产生/修改的文件（run_command 的 `changed_files` 等）。每次变化用 `pi.appendEntry("gui-pi-facts")` 存进会话，`session_start` 时从当前分支恢复，所以压缩不会丢。
-6. **压缩**：`session_before_compact` 直接给出确定性摘要：任务事实原文 + 计划与里程碑状态 + 最后窗口标题（提示先重读）。门自己的状态（denied_effects、计划、历史）在 gate 进程里，不受压缩影响。
-7. **一份计划状态**（`src/plan.ts`）：由模型的 `set_plan` 建立（同样发给 gate）。gate 每个结果末尾机械附加的 `[plan] k/n done` 行从结果里删掉，模型只从一处听到计划。提醒只在：里程碑完成或失败、压缩之后的第一个结果、偏航（刚被拒绝、或连续 8 个动作没有进展）。
+4. **截图**：每张图到达时得到一个 id（`img-N`，紧跟在图后的一行文字里），原始字节（JPEG q60 全尺寸，不缩放、不重编码）写进会话目录下的私有目录（`gui-pi-images/<session>/`，目录 0700、文件 0600）。上下文里**最多**同时有：**3 个窗口各自的最新一张**（最近活动的 3 个窗口；同一窗口只留最新一张）**＋ 3 张固定证据图**（模型用 `pin_evidence {id, label}` 固定，可 `unpin`；固定列表用 `appendEntry("gui-pi-pins")` 保存，压缩和重启后恢复）**＋ 最近一次 `recall_image` 取回的那张**。也就是说上限是 3＋3＋1 = 7 张（固定图恰好是某窗口最新图时会少于 7）：**不是**“总共 3 张”，也**不是**“每个窗口 3 张”。其余图片换成一行“img-N 已移出上下文，recall_image 可取回”。
+   - 这个数量是否过多，不凭张数判断，而看主模型的延迟：扩展记录每次主模型请求的首 token 时间（`before_provider_request` → 第一个流式 `message_update`）、总时间（→ `message_end`）、这次请求上下文里的图片数、input / output / cache_read token（`src/latency.ts`，写到 `<data>/logs/model.jsonl`，`gui-pi-latency/1`；测不到的值记 null，不估算）。以后按图片数分组看延迟和缓存命中再决定是否收紧。
+5. **任务事实**（`src/facts.ts`）：程序原文保存，不由模型重新概括：
+   - **用户消息序列**：首个请求和之后每一条更正 / 追加都记，每条带版本号（1, 2, …）、来源（`initial` = 启动任务的原话、`task_file` = 壳写的可信任务文件 gui-pi-task/1 里的条目（扩展只读，带任务文件版本）、`input` = Pi 的 input 事件、`session` = 会话里的 user 消息）和时间；同一段文字从不同来源到达只记一次。**权威记录不截短**（0.3.1 有 4000 字上限且只存第一次，已去掉）；只有展示可以截短：压缩摘要里总长超过 24000 字时，第一条和最新三条仍全文，中间的截到 2000 字并写明“其余字符保存在任务记录里”。
+   - **事实分三类**：`tool_evidence`（工具观察到的，例如 gate v0.10.3 报告已满足的后置条件）、`agent_note`（模型用 `note_fact` 记的，未经工具验证）、`check`（check_done 说“没有缺口”：这是模型的判断，**不等于环境证明任务成功**）。三类在摘要里分开列。
+   - 人的回答和每次拒绝结果、gate 拒绝过的效果、本次产生/修改的文件（run_command 的 `changed_files` 等）。
+   每次变化用 `pi.appendEntry("gui-pi-facts")` 存进会话，`session_start` 时从当前分支恢复，所以压缩不会丢。
+6. **过程状态自动保留**（`src/progress.ts`）：不靠模型 `note_fact`，由程序从工具结果和门的结构化状态里提取，`appendEntry("gui-pi-progress")` 保存、恢复：
+   - 最近失败的方法（被拒、没执行、驱动报错、批量中途停下、后置条件未满足；最多 8 条）；
+   - 未验证的假设（结果未知且还没重读；执行了但没有观察或后置条件没检查；check_done 的“没缺口”）；
+   - 未完成的子目标 / 操作（未完成的计划里程碑、批量里没跑的步骤、等人的步骤、结果未知待重读、check_done 列出的缺口）；
+   - 临时约束（人做过的步骤不要重发、读工具不能写文件、某步骤不再问人、平台状况、gate 给出的 `constraints`）。
+   一次成功的读窗口会清掉“结果未知待重读”。
+7. **压缩**：`session_before_compact` 直接给出确定性摘要：用户消息序列 + 三类事实 + 计划与里程碑状态 + 过程状态 + 固定证据图 + 最后窗口标题（提示先重读）。压缩回退时把分支上**所有** user 消息全文补进序列（0.3.1 只取首条前 2000 字）。门自己的状态（denied_effects、计划、历史）在 gate 进程里，不受压缩影响。
+8. **新鲜度与锚点**（`src/observe.ts`）：动作结果里 gate 自动附的观察、模型自己读的窗口、下一轮前 gate_next_step 要的读，**共用一个新鲜度判断**：某窗口最新观察之后没有别的动作、不超过 10 秒、需要截图时它带截图，就不再读一遍（写进 `gui-pi-nextstep` 记录 `skipped: "fresh"`）。客户端在下一轮前**主动补读整棵树**（普通 `get_window_state`，gate 回完整树并把它作为新的 diff 基底）的情况：该窗口自上次完整树以来 diff 超过 6 个；来了一个基底不在上下文里（从没见过或已被压缩掉）的 diff；刚压缩过；人刚做过一步（接管 / 我替你做了，这时再附一次窗口列表）。这样不只靠给模型提示。
+9. **一份计划状态**（`src/plan.ts`）：由模型的 `set_plan` 建立（同样发给 gate）。gate 每个结果末尾机械附加的 `[plan] k/n done` 行从结果里删掉，模型只从一处听到计划。提醒只在：里程碑完成或失败、压缩之后的第一个结果、偏航（刚被拒绝、或连续 8 个动作没有进展）。
 
 ### 4.5 MCP 客户端（2026-07-28）
 
@@ -174,7 +186,8 @@ Pi 只有在自带 read/bash 工具启用时才把 skill 列进系统提示词�
     | input_required | 需要人，什么都没执行 | 写明未执行 |
     | blocked + `next_action: "rethink"` | 门要求重新生成候选（extra_reason 的拦截版） | 告诉模型别重发、别换个说法重发，从当前窗口重新想下一步 |
     | done_by_person（旧门：`gate.done_by_person`） | 接管后人做完了这一步 | 告诉模型别重发；**同一工具 + 同一参数在本任务内被拦下**；结果没附新读时，读窗口前其他动作被拦下 |
-    | done | 非 GUI 工具的回答 | 无 |
+    | done | 已执行（gate v0.10.3 统一状态），或非 GUI 工具的回答 | 无 |
+  - **gate v0.10.3 结构化执行状态**（向前兼容：每个字段都可缺，缺了就按上表旧行为）：`continuation_id`（别名 `resume_id` / `continue_id` / `state.*`）原样告诉模型并放进 details，它只标识这次决定、不授予任何东西；`completed`（已完成的批量步骤下标，0 起；别名 `completed_indices` / `batch.completed`，`index_base: 1` 时按 1 起）→ 写明哪些步骤跑了、哪些没跑（时间线同样显示）；`postconditions`（`[{what, met, detail}]`，别名 `postcondition` / `evidence`）→ `met: true` 记为工具证据，`false` 记为失败方法，`null` 记为未验证。`unknown` 时模型看到“RESULT UNKNOWN … Do not resend it directly”，主窗口时间线显示“结果未知 - result unknown … not resent”。
   - `structuredContent.human_outcome`（decline / cancel / timeout / closed / unavailable，旧门从文字识别）→ 一律按拒绝，写进任务事实，并在壳的时间线上显示原因。
   - gate 在调用前已退出 → status blocked（没执行）；调用途中退出或超时 → status unknown（不重试）；同时通过 `ui.notify` 和 stderr 报告 “gui-gate exited”，壳显示。
   - 结果 `resultType: "input_required"` → 对每个 `inputRequests[k]`（只接受 `elicitation/create`，mode form）交给问人桥，得到 ElicitResult；用**新 id** 重发同一 `tools/call`，带 `inputResponses` 和原样 `requestState`；最多 3 轮。
@@ -255,16 +268,20 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
 
    | 类型 | 显示 | 按钮 → 结果（只有这一种形状） |
    |---|---|---|
-   | approve | gate 确认的具体对象、范围、允许后的后果、gate 为什么问 | 【拒绝】【允许】→ `{decision}` |
-   | clarify | 问题；每个选项及“选它之后会怎样”；没有选项时可自由回答 | 选项 / 文本 → `{answer}`；【不回答】→ 拒绝。回答不是批准 |
-   | takeover | 人要做的最少步骤；“agent 的输入已暂停”；“完成”不会让 agent 重做原动作 | 【我不做】【完成】→ `{done}` |
-   | help | agent 已经试过的办法、卡住的原因 | 【给个提示】（文本）→ `{choice: try_other, note}`；【我替你做了】→ `{choice: did_it}` |
+   | approve | gate 确认的具体对象、范围、允许后的后果、gate 为什么问；固定一句“允许只批准这一个效果：<对象>（<范围>），不批准别的目标、别的内容、之后的步骤或重复；其他的 gate 会再问”；gate 没给的对象 / 范围 / 后果明确写“gate 没说：…，不确定就拒绝”，不编造 | 【拒绝】【允许】→ `{decision}` |
+   | clarify | 问题；**少量有实际差别的选项**（最多 4 个，按值去重：同一个值换个大小写或空格只算一个），每个带“选它之后会怎样”；超过 4 个或允许其他答案时可自由输入 | 选项 / 文本 → `{answer}`；【不回答】→ 拒绝。回答不是批准 |
+   | takeover | 人要做的**最少步骤**（最多列 5 步，多出来的只计数）；“agent 的输入已暂停”；“完成之后 agent 先重读窗口（以及你可能改过的东西），不会重复或重放它原来的动作” | 【我不做】【完成】→ `{done}` |
+   | help | agent **已经试过的办法**（gate 给的清单；gate 没给时用扩展自动记录的失败方法，标明“来自 agent 日志”）、卡住的原因；说明两个选择：给提示（agent 用提示换办法）或我替你做（agent 重读后继续、不重复） | 【给个提示】（文本）→ `{choice: try_other, note}`；【我替你做了】→ `{choice: did_it}` |
+   - 接管 / 我替你做之后：扩展把这一步加入“不再发送”（同工具同参数被拦），下一轮前客户端自己完整重读受影响窗口并附窗口列表（§4.4 第 8 条），**从不自动重放原动作**。
 
    - 读字段时宽容（`object`/`target`/`effect.resources`、`scope`、`consequence`、`options[{label,value,effect}]`、`steps`、`tried`），缺什么就不显示，从不编造。
    - 倒计时到 0 → 超时（拒绝）；关闭弹窗 → 取消（拒绝）；应用退出、点停止、agent 进程结束时还开着的问题 → 取消（拒绝）。
    - 每个请求 id 只答一次；同一弹窗只认第一次点击（`human::Pending`）。同时只显示一个弹窗；队列按先来后到。
    - 主窗口时间线每个问题只有一行结果（允许 / 拒绝 / 取消 / 超时 / 窗口关闭 / 无人可问；非“是/回答”标“按拒绝处理”）。
-4. **问人指标**（`human::Metrics`，只写日志，不额外显示）：每个问题一行 `{"ev":"human_q","schema":"gui-pi-human/1","task","type","outcome","refused","secs","repeated","takeover_steps"}`，任务结束一行 `human_summary`：询问次数、按类型计数、重复问题数与比例（同类型、规范化后文字相同）、`person_active_s`（弹窗出现到人回答，含接管时人动手的时间）、`person_wait_s`（任务中没有问题开着、人只是在看的时间）、`agent_blocked_s`（问题开着的总秒数）、接管步骤数、取消 / 超时 / 拒绝 / 无人可问次数、任务秒数。写到 `<data>/logs/human.jsonl`，供 bench/human_pilot.py 读。
+4. **问人指标**（`human::Metrics`，只写日志，不额外显示；schema `gui-pi-human/2`）：每个问题一行 `{"ev":"human_q","schema":"gui-pi-human/2","task","type","outcome","refused","wait_s","active_s","evidence","repeated","takeover_steps"}`：
+   - `wait_s`：弹窗出现到结束（回答 / 超时 / 关闭），是**等待时间**，从不当作操作时间；
+   - `active_s`：只来自弹窗里的**交互证据**（按键、点击、输入、滚动、指针移动）：从第一次交互到回答；只有回答那一下点击（`evidence: answer_only`）、完全没有交互（`none`）、接管（人在别的窗口操作，`outside_popup`）时记 **null（缺失）**，不拿等待时间补；`active_s` 不超过 `wait_s`。
+   任务结束一行 `human_summary`：询问次数、按类型计数、重复问题数与比例（同类型、规范化后文字相同）、`person_active_s`（有证据的 active_s 之和）、`person_active_missing`（缺失的问题数）、`person_active_upper_s`（这些问题的 wait_s 之和，作为上界）、`question_wait_s`（弹窗开着的总秒数）、`no_question_s`（没有问题开着、人只是在看的时间；1 版叫 person_wait_s）、`agent_blocked_s`、接管步骤数、取消 / 超时 / 拒绝 / 无人可问次数、任务秒数。写到 `<data>/logs/human.jsonl`，供 bench/human_pilot.py 读（1 版把整个弹窗时间记成 person_active_s，已改）。
 
 ### 6.2 设置页
 
@@ -273,7 +290,9 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
 | 主模型 | 协议（openai-completions / openai-responses / anthropic-messages / google-generative-ai）、Base URL、模型名、密钥、thinking（默认 medium，不低于 medium）、是否支持图片 | 必填 |
 | 审核模型 | 协议（chat / responses / anthropic / gemini / systemone）、URL、模型名、密钥、超时 | **必填，不能关**（设置文件里也没有关闭它的字段，多出来的字段整份拒收） |
 | 问人 | 超时秒数（默认 120，最小 30） | 超时 = 拒绝 |
-| 高级（默认折叠） | 7 个可选角色 feasibility、planner、verifier、judge、search、compact、grounder；每个：关闭 / 主模型 / 同审核模型 / 自定义端点 | 默认关闭；自定义端点的空字段（含密钥）继承主模型；映射到 `GUI_GATE_ROLE_<NAME>_*` 或 `GUI_GATE_ROLE_<NAME>=reviewer` |
+| 高级（默认折叠） | 7 个可选角色 feasibility、planner、verifier、judge、search、compact、grounder；每个：关闭 / 主模型 / 同审核模型 / 自定义端点；planner、search、compact 另有“在门内运行”勾选（`in_gate_roles`，默认不勾） | 默认关闭；自定义端点的空字段（含密钥）继承主模型；映射到 `GUI_GATE_ROLE_<NAME>_*` 或 `GUI_GATE_ROLE_<NAME>=reviewer` |
+
+角色开关的优先级（`Settings::role_enabled`，`launch::gate_env`；只发配置，不依赖 gate 的实现细节）：**显式关闭最高**——设置成“关闭”的角色总是发 `GUI_GATE_ROLE_<NAME>_ENABLE=0` 且**不发任何端点变量**，不管组开关（`GUI_GATE_097`）、`GUI_GATE_ROLES_ENABLE` 或 gate 自己的默认值；planner / search / compact 的**门内版本默认关闭**（没勾“在门内运行”时同样发 `_ENABLE=0`、不发端点），因为还没有证据表明门内版本有净收益；其余配置了的角色发端点变量和 `_ENABLE=1`。桌面版从不发组开关 `GUI_GATE_ROLES_ENABLE`。gate v0.10.2 对 feasibility / verifier / judge / grounder 不读 `_ENABLE`，但没有端点变量时这些角色本来就不存在，所以“关闭”在 v0.10.2 上也成立；v0.10.3 起 gate 也按“显式关闭优先”处理。
 
 校验（`config::check_base_url` 等，Rust 侧判定，页面只做提前提示）：Base URL 必须 https，只有 localhost / 127.0.0.0/8 / [::1] 允许 http；URL 里不许带用户名密码；`http://localhost.evil.com` 之类前缀伪装不通过；主模型和审核模型的模型名不能为空。
 
@@ -334,10 +353,16 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
 
 | 平台 | 状态 | 要点 |
 |---|---|---|
-| Linux | 第一阶段 | 只承诺 X11；Wayland 会话启动自检明确提示（读不到别的应用窗口、输入和截图受限），建议换 X11/Xorg 会话。自检 AT-SPI 总线、DBus 会话、Secret Service（没有就提示“密钥只存本次运行内存”）、WebKitGTK 4.1、glibc ≥ 2.35；失败显示在设置页，fail 项阻止开始 |
+| Linux | 第一阶段 | 见 §6.8.0 |
 | Windows | 第二阶段（x86_64，CI 构建 + 冒烟，未上真机） | 应用没有 UIA 时只能看截图；完整性级别：普通权限的 agent 不能给管理员窗口发输入（要人接管）；UAC 在安全桌面上，agent 看不到也点不到（接管）；DPI 感知与多屏缩放；RDP 断开时没有可交互桌面；run_command 不是 bash，风险规则不能直接套 bash 规则 |
 | macOS | 第三阶段（universal，CI 构建 + 冒烟，未签名未公证，未上真机） | “辅助功能”和“屏幕录制”两项权限分别授权（授给包内 CuaDriver.app，不是 gui-pi），撤销后要重启应用才生效；签名身份要稳定，否则权限失效；Retina 下截图像素 = 2× 逻辑点，坐标换算按 §6.6 由驱动给出缩放 |
 
+
+#### 6.8.0 Linux：X11 支持范围与 AT-SPI / DBus 丢失
+
+- **支持范围**：只承诺 **X11（Xorg）会话**，x86_64，glibc ≥ 2.35（Ubuntu 22.04 及以后），需要 DBus 会话总线、AT-SPI（at-spi2-core，应用开启无障碍）和 WebKitGTK 4.1。**Wayland 会话不承诺**：启动自检给 warn（读不到别的应用窗口、输入和截图受限；XWayland 应用部分可用），建议换 X11/Xorg 会话。没有图形会话（DISPLAY / WAYLAND_DISPLAY 都没有）是 fail。多显示器、HiDPI 缩放按驱动报告为准（§6.6）。
+- **启动自检**（`selfcheck::evaluate` / `selfcheck::buses`）：DBus 会话、AT-SPI 总线、Secret Service（没有就提示“密钥只存本次运行内存”）、WebKitGTK 4.1、glibc；fail 项阻止开始。总线地址是 `unix:path=…` 而 socket 文件已不存在（总线死了、变量过期）时按**不可达**处理，不再按变量存在就算通过；`dbus-send` 对给定地址做 5 秒超时的探测。设置页【Re-check】可在任务中途重新检查。有单元测试（失效的 DBus / AT-SPI 地址 → 两项 fail、不能开始）。
+- **任务中途丢失**（`packages/gui-pi/src/platform.ts`）：工具结果是错误 / 未执行 / 未知，且驱动的错误文字是 AT-SPI / DBus 丢失（`org.a11y.Bus`、“accessibility bus … not / failed”、DBus 连接断开等）时：结果后附固定说明（别盲目重试；读一次窗口看是否恢复；没恢复就请人接管——重启应用或重新登录——或停下报告）；**连续两次**后，GUI 动作在客户端被拦下（读窗口、request_human、计划 / 报告类工具仍可用），直到一次读窗口成功；过程状态里记一条约束；主窗口时间线显示“platform: the accessibility bus … was lost”。只对错误结果分类，应用自己界面里出现的同样字样不算。有单元测试和带假 gate 的端到端测试。
 
 #### 6.8.1 Windows（x86_64）
 
@@ -346,6 +371,8 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
 - 自检：Windows 版本、WebView2 运行时、UI Automation 是否应答、会话类型（RDP 断开 / 锁屏没有可交互桌面 → 警告）、是否以管理员运行（警告：agent 也能操作管理员窗口，建议普通权限启动）、凭据管理器。
 - human IPC：`127.0.0.1` 随机端口 + 一次性 token（命名管道仍是计划）。gate 自己的 PowerShell 对话框只在没有客户端问人通道时才会用；桌面版总是走 MRTR → 应用弹窗。测试里一律 `GUI_GATE_DIALOG=none`（CI 曾因真实 PowerShell 对话框等满 120 s 超时而“卡住”）。
 - run_command 在 Windows 上**不提供**（风险规则按 bash 写），终端行规则也只认 Linux/macOS 的终端；在 Windows 上让 agent 用 GUI 完成，命令行操作交给人。
+- **普通权限**：安装是按用户（NSIS `installMode: currentUser`，不要求管理员），应用以普通权限运行；以管理员运行时自检给 warn（agent 也能操作管理员窗口）。普通权限的 agent 不能给管理员窗口发输入（UIPI）。
+- **转真人的情况**（`platform.ts`，按驱动 / 系统的错误文字识别，只看错误结果）：UAC 提示在安全桌面上（agent 看不到也点不到）→ `secure_desktop`；会话锁屏 → `locked`；RDP 断开 / 最小化导致没有可交互桌面 → `no_desktop`；目标是管理员窗口 → `elevated_target`。每种都附固定说明“别重试，请人接管（request_human takeover）或停下报告”，连续两次后客户端拦下 GUI 动作，直到读窗口成功或人做完这一步；时间线显示对应的说明。识别用的错误文字以 Cua Driver 的实际输出为准，**真机上的实际措辞待验证**（目前只有单元测试）。
 
 #### 6.8.2 macOS（13+，universal：Apple silicon + Intel）
 
@@ -358,6 +385,7 @@ decide.rs、command.rs、authz.rs、reviewer.rs、loopbreak.rs 的逻辑不改�
   5. 首次启动后设置页显示 CuaDriver 的两项权限；点【Grant permissions】运行包内 `cua-driver permissions grant`，由 CuaDriver 自己弹系统授权（系统把权限记在 CuaDriver 名下）；也可用【Open Accessibility / Screen Recording settings】直接打开对应设置页手动打开开关，授权后重启 gui-pi。
 - 自检：macOS 版本（< 13 为 fail）、包内 CuaDriver.app 是否存在、`cua-driver permissions status --json` 读出的辅助功能 / 屏幕录制（解析按键名模糊匹配，见 `selfcheck::permission_state`；CI 实际输出见 test-log）、钥匙串。
 - gate 在 macOS 上用 `ps` / `lsof` 认终端（Terminal.app、iTerm2）和 shell 的工作目录（Linux 用 /proc），所以在终端里敲的删除 / 覆盖命令同样走风险规则。
+- **待真机验证**（CI 只做了构建和冒烟，没有真机）：实际发布包的签名状态（gui-pi 本身未签名未公证；包内 CuaDriver.app 保持 Cua 签名，CI 用 `codesign --verify --deep --strict` 检查）、辅助功能 / 屏幕录制的授予流程、**升级到新版本后权限是否保持**（设计上权限记在 CuaDriver 名下、其签名不变所以应保持，但未在真机上验证）、锁屏 / 屏保时的行为。
 
 ---
 
@@ -378,12 +406,28 @@ resources/
 - 不改 PATH，不写 shell profile；数据只在 `~/.config/io.github.cszf1.gui-pi-desktop`、`~/.local/share/io.github.cszf1.gui-pi-desktop`、`~/.cache/io.github.cszf1.gui-pi-desktop`、`$XDG_RUNTIME_DIR/gui-pi-desktop`（Tauri 按 identifier 命名）。
 - 用户已装的 Cua Driver 不动；gate 用 `--driver` 指向包里的驱动。
 
-### 7.1 卸载范围（`packaging/linux/uninstall.sh`）
+### 7.1 卸载边界（各类数据的去留）
+
+| 数据 | 位置（Linux；Windows / macOS 见下） | 卸载时 |
+|---|---|---|
+| 程序本体与包内资源（node、Pi、扩展、gui-gate、Cua Driver、SHA256SUMS） | AppImage：`~/Applications/gui-pi-desktop/`（当前版 + 上一版）；.deb：`/usr/…` | uninstall.sh 删 AppImage 目录和 .desktop 文件；.deb 用 `apt remove`（不碰用户数据） |
+| 设置（`config.json`，不含密钥） | `~/.config/io.github.cszf1.gui-pi-desktop/` | uninstall.sh 删 |
+| 会话、截图、日志 | `~/.local/share/io.github.cszf1.gui-pi-desktop/`：`pi-agent/`（Pi 的会话文件，含任务原文与模型对话）、会话目录下的 `gui-pi-images/<session>/`（所有截图原始字节，0600）、`logs/`（gate.jsonl、human.jsonl、model.jsonl、任务事件日志） | uninstall.sh 删（截图和日志都在这里，不会留在别处） |
+| 缓存 | `~/.cache/io.github.cszf1.gui-pi-desktop/`（WebView 缓存等） | uninstall.sh 删 |
+| 运行时文件 | `$XDG_RUNTIME_DIR/gui-pi-desktop/`（问人 socket、任务文件；任务结束即删任务文件，注销时系统清空） | uninstall.sh 删 |
+| 钥匙串里的密钥 | Secret Service，服务名 `gui-pi-desktop`，账户 `main` / `reviewer` / `role.<name>` | **默认保留**；`uninstall.sh --keys` 才删（用 secret-tool；没有就提示到钥匙串应用里手动删）。钥匙串不可用时密钥只在内存，退出即无 |
+| 用户文档、agent 操作过的文件 | 用户自己的目录 | **从不删除**（agent 产生 / 修改的文件属于用户） |
+| 别处装的 Cua Driver、Pi 的 `~/.pi`、gui-gate 的 `~/.config/gui-gate`、/usr 和 /opt 下的东西 | — | **从不删除** |
+
+Windows：数据在 `%APPDATA%\io.github.cszf1.gui-pi-desktop`（设置、会话、截图、日志）和 `%LOCALAPPDATA%\io.github.cszf1.gui-pi-desktop`（缓存、WebView2 数据），密钥在凭据管理器（`gui-pi-desktop`）。NSIS 卸载器删除安装目录（CI 验证 exe 被删）；对应用数据目录的处理（Tauri NSIS 卸载页的“删除应用数据”选项、静默卸载时的默认）**未在真机验证**，目前按“可能保留”对待：需要彻底清除时手动删上面两个目录和凭据管理器里的条目。macOS：`~/Library/Application Support/io.github.cszf1.gui-pi-desktop`、`~/Library/Caches/io.github.cszf1.gui-pi-desktop`，密钥在钥匙串（`gui-pi-desktop`）；把 .app 拖进废纸篓不会删这些，也不会撤销 CuaDriver 的系统权限（在“隐私与安全性”里手动移除）。Windows / macOS 目前没有清理脚本。
+
+#### 7.1.1 Linux 卸载脚本（`packaging/linux/uninstall.sh`）
 
 只删应用自己的目录：上面四个 + `~/Applications/gui-pi-desktop`（appimage-update.sh 装的当前版和上一版）+ `~/.local/share/applications/io.github.cszf1.gui-pi-desktop.desktop`；`--keys` 时再删钥匙串里服务名 `gui-pi-desktop` 的条目。脚本里有守卫：每个路径必须是绝对路径、在 `$HOME` 或 `$XDG_RUNTIME_DIR` 下、最后一段必须是应用自己的名字，否则整体拒绝（例如把 XDG_CONFIG_HOME 设成 /etc）。**从不删除**：此前或另外安装的 Cua Driver（`~/.local/bin/cua-driver`、`~/.cua`、`/usr/local/bin/cua-driver` 等）、用户文档、Pi 自己的 `~/.pi`、gui-gate 的 `~/.config/gui-gate`、/usr 和 /opt 下的任何东西（.deb 用 apt 卸载，postrm 不删用户数据）。`--print-paths` / `--dry-run` 先看清单。有测试（core/tests/scripts.rs）：路径清单、真实运行后假的 Cua Driver 和用户文件都还在。
 
 ### 7.2 发布与更新
 
+- **完整性与来源真实性是两回事**：包内 SHA256SUMS 只解决**完整性**（安装后组件有没有被改坏、缺失、被 linuxdeploy 之类工具改写），它和包在一起，换掉整个包的人也能换掉它，所以**不能证明包来自本项目**。**来源真实性**需要签名或可信发布链（代码签名 / 公证、Sigstore 之类的签名发布）；目前 gui-pi 自己的包都未签名（Windows 未签名、macOS 未签名未公证、AppImage 无签名），用户能做的是从本项目 GitHub Release 下载并核对发布页上的 SHA256SUMS——这依赖 GitHub 账号和发布流程本身可信。驱动 Cua Driver 的签名原样保留并在打包时校验。签名发布是未来工作。
 - **完整性**：stage-resources.sh 给 resources 里每个文件写 SHA256SUMS（随包，也作为 `resources.SHA256SUMS` 发布）；CI 再给 AppImage / .deb 写 `SHA256SUMS` 一起发布。应用每次启动（后台线程）按包内 SHA256SUMS 校验所有组件（node、Pi、扩展、提示词、skills、gui-gate、Cua Driver 及其签名文件）：有改动或缺失就在设置页说明并**阻止开始任务**；不修复、不重签，驱动签名保持原样。开发运行没有 SHA256SUMS 时只提示“未校验”。
 - **不自动更新**：设置里可关的“更新提示”只读 GitHub 上最新的正式 release（不含预发布 / CI 构建），版本更新时在主窗口和设置页显示一行提示和下载页，什么都不下载、不安装。
 - **回滚**：`packaging/linux/appimage-update.sh install NEW.AppImage SHA256SUMS` 先按发布的 SHA256SUMS 校验（不在清单里或哈希不对就拒绝），再把当前版改名为 `gui-pi-desktop.previous.AppImage`、新版成为当前版；`rollback` 交换两者。设置和数据目录两版共用。有测试。
@@ -430,7 +474,10 @@ resources/
 
 ## 9. 和基线对比
 
-- 基线：v0.9.9 + 7 个角色（deepseek-v4.1-flash）+ 审核 System One，OSWorld-Verified 部分结果 137/255 有效题（53.7%）。
+- 基线（最新口径，替换此前写的“137/255（53.7%）部分结果”，那个数字已过时）：v0.9.9 + 7 个角色（deepseek-v4.1-flash）+ 审核 System One 在 gui-pi3 上的 OSWorld-Verified 全量运行（gui-gate `results/osworld-verified-v099-ds41-2026-10-23/`，`--human deny`；数字与 gui-gate README / docs/failure-analysis-v099.md 一致）：**185/361 = 51.25%（计划口径**：361 道计划题，infra 失败和缺失都计为失败）、**185/332 = 55.72%（有效口径**：去掉 28 个 infra 和 1 个未运行）。
+  - 这是**自定义原生环境**（gui-gate bench/osworld_native.py），不是官方 OSWorld 环境，**不能和官方排行榜直接比较**。
+  - 这次运行**没有对照组**（同环境、同模型、不带门或换策略的对照），所以**不能证明门控的贡献**；成功率的变化也可能来自模型、环境或任务抽样。
+  - 两个口径都要报，不能只报有效口径。
 - 新 agent 用同一主模型、同一审核模型、同一角色配置、同一任务子集和评分脚本（gui-gate bench/osworld_native.py），区别只在：Pi 系统提示词与 skills、上下文策略、MRTR 问人（bench 里 `--human deny` 等价：IPC 自动拒绝）。
 - 只在用户下命令后跑；跑在新测试机，不碰 gui-pi3。
 - 报告：成功率、每题回合数、截图数、门干预分布、耗时；逐题对比列出差异题。
@@ -465,6 +512,8 @@ resources/
 | 每次调用 `_meta["gui_pi/usage"]` | `{input, output, cache_read}`（+ 可选 `same_message`），gate 按调用记录 | gate 忽略未知 `_meta` 键 |
 
 v0.10.2（0.3.1 起打包）：ask_help 结果带 `human_choice`（`another_way` = 人让换个方法，是回答；`did_it`）；新 `human_outcome`：`task_changed`、作废（reset 后 `void`，其超时带 `voided`）、`late`、`not_asked_again`、`expired`、`channel_unavailable`，答案被拒收时 gate 回 JSON-RPC `-32602 Invalid requestState`（扩展记为 `answer_rejected`）；`tier: "write_args"`（读工具带写文件参数被拒）；`tier: "freeze"`（有人在回答，reset 之后也一样，直到回答或超时）；审核原话不再返回，`gate_report.reviewer` 只是 `configured | none`；应用文本里像 gate 行的内容被加上 `(app text) ` 前缀；gate 自己的桌面对话框默认按钮是拒绝。
+
+v0.10.3（即将发布；0.3.2 已按向前兼容适配，GATE_REF 仍是 v0.10.2）：统一执行状态 `status: done | partial | unknown | input_required | done_by_person | blocked`、`continuation_id`、已完成批量下标 `completed`、后置条件证据 `postconditions`、可选 `constraints`；具体字段名与别名见 §4.5。任何字段缺失都按 0.3.1 的行为处理（单元测试覆盖“有”和“没有”两种）。角色：桌面版对每个角色发显式 `GUI_GATE_ROLE_<NAME>_ENABLE=0|1`（§6.2），期望 v0.10.3 的 gate 按“显式关闭优先于组开关和端点存在”执行。
 
 ## 12. 威胁模型
 

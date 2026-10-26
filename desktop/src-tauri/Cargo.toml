@@ -1,6 +1,6 @@
 [package]
 name = "gui-pi-desktop"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "Desktop computer-use agent: Pi + gui-gate + cua-driver"
 license = "MIT"

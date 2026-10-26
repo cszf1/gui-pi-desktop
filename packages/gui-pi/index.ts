@@ -3,11 +3,19 @@
 //   - registers the gate's tools as Pi tools (the model only writes `arguments`); client-only gate tools
 //     (gate_next_step, gate_reset) and the old authorisation/config tools are never offered to the model
 //   - before each model turn asks the gate what to look at (gate_next_step) and attaches that read (advisory only)
-//   - reads the gate's structured status (executed / blocked / partial / unknown / input_required / done_by_person,
-//     next_action rethink, human_outcome)
+//   - reads the gate's structured status (executed / done / blocked / partial / unknown / input_required / done_by_person,
+//     next_action rethink, human_outcome; gate v0.10.3 continuation id, completed batch indices, postcondition
+//     evidence - all optional, forward compatible)
 //   - context strategy: per window the newest observation + the diff bases it builds on, old reads summarised,
 //     newest screenshot per window + pinned evidence (pin_evidence), every image stored and recallable (recall_image),
-//     task facts kept across compaction, one plan state with reminders only at milestones / after compaction / on drift
+//     task facts (every user message, versioned, never shortened) and the process state (failed methods, unverified
+//     assumptions, open sub-goals, constraints - extracted from tool results) kept across compaction, one plan state
+//     with reminders only at milestones / after compaction / on drift
+//   - one freshness judgement for automatic and next-step observations; full anchor reads when a diff chain is long,
+//     its base is missing, after compaction or after a person acted
+//   - platform conditions (lost AT-SPI / DBus, UAC secure desktop, locked session, RDP disconnected, admin window):
+//     a fixed note and, when repeated, GUI actions held until a read works
+//   - main-model latency per request (time to first token, total, images in context) to a JSONL log
 //   - skills listed by name and loaded on demand (load_skill)
 //   - sends the model's real token usage with each tool call (_meta gui_pi/usage)
 //   - Stop from the shell: no new action, gate_reset, gate killed
@@ -20,13 +28,15 @@
 //   GUI_PI_GATE_LOG      gate JSONL log path (default: none)
 //   GUI_PI_TASK_FILE     the trusted task channel the shell writes (passed to the gate as --task-file; never written here)
 //   GUI_PI_TASK          the user's first request, verbatim (task facts; the gate's --task only without a task file)
+//   GUI_PI_LATENCY_LOG   main-model latency JSONL (default: model.jsonl next to GUI_PI_GATE_LOG; none without either)
+//   GUI_PI_FRESH_MS      how long an observation counts as fresh (default 10000; 0 = never; tests)
 //   GUI_PI_SKILLS        skills root (fallback when Pi's own skill list is not available)
 //   GUI_PI_HUMAN_TIMEOUT seconds a person has (default 120; timeout = refusal)
 //   GUI_PI_HUMAN_IPC / GUI_PI_HUMAN_TOKEN   the shell's popup service (also hands over the gate's settings once,
 //                        and tells the extension when the user pressed Stop); GUI_PI_HUMAN_SCRIPT (tests only)
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { McpClient, CLIENT_ONLY_TOOLS, CLIENT_META, type ToolResult } from "./src/mcp.ts";
 import { prune, obsKind, obsMeta, diffNote, textOf, OBSERVE_TYPE, RECALL_TOOL } from "./src/context.ts";
 import { makeAskHuman } from "./src/human.ts";
@@ -34,6 +44,11 @@ import { PersonFreeze } from "./src/freeze.ts";
 import { PlanTracker, Reminder, stripGatePlan } from "./src/plan.ts";
 import { interpret, refusedEffect, READ_TOOLS, HUMAN_LABEL, PERSON_SAID_NO } from "./src/status.ts";
 import { TaskFacts, ENTRY_TYPE, filesOf } from "./src/facts.ts";
+import { Progress, PROGRESS_ENTRY, postconditions } from "./src/progress.ts";
+import { ObsTracker, FRESH_MS } from "./src/observe.ts";
+import { LatencyBook } from "./src/latency.ts";
+import { PlatformHealth, CONSTRAINT as PLATFORM_CONSTRAINT } from "./src/platform.ts";
+import { GG } from "./src/mcp.ts";
 import { gateArgs, gateEnv, fetchGateEnv } from "./src/env.ts";
 import { NextStepper, ClientTool, isClientOnly, NEXT_STEP_TOOL, type Focus } from "./src/nextstep.ts";
 import { ImageStore, imageTag, PINS_ENTRY, MAX_PINS } from "./src/images.ts";
@@ -43,7 +58,7 @@ import { SkillIndex, scanSkills, SECTION as SKILL_SECTION } from "./src/skills.t
 import { watchStop } from "./src/stop.ts";
 import { ActionGuard, UnknownGuard } from "./src/guard.ts";
 
-export const VERSION = "0.3.1";
+export const VERSION = "0.3.2";
 /** Tools an old gate may still list that the agent must never call (authorisation and config are not the agent's). */
 export const HIDDEN_GATE_TOOLS = new Set(["gate_confirm", "gate_task", "gate_config"]);
 export const NOTE_FACT = "note_fact";
@@ -51,6 +66,7 @@ export const PIN_EVIDENCE = "pin_evidence";
 export const LOAD_SKILL = "load_skill";
 export const RESET_TOOL = "gate_reset";
 export const NEXT_STEP_ENTRY = "gui-pi-nextstep";
+export const LATENCY_FILE = "model.jsonl";
 /** Tools the extension itself adds (the shell lists them in Pi's --tools). */
 export const OWN_TOOLS = [NOTE_FACT, PIN_EVIDENCE, RECALL_TOOL, LOAD_SKILL];
 export { gateArgs, UnknownGuard, ActionGuard };
@@ -75,6 +91,9 @@ function focusOf(key: string | undefined): Focus {
   return m ? { pid: Number(m[1]), window_id: Number(m[2]) } : null;
 }
 
+/** A user message's text (Pi: content is a string or an array of parts). */
+export const userText = (m: any): string => (typeof m?.content === "string" ? m.content : textOf(m));
+
 const textItems = (r: ToolResult) => (r.content || []).filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n");
 
 export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
@@ -85,11 +104,27 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
   secrets.add(env.GUI_PI_HUMAN_TOKEN);
   const human = makeAskHuman(env, () => ui);
   const freeze = new PersonFreeze();
-  const mcp = new McpClient(freeze.wrap(human.ask), VERSION);
+  const progress = new Progress();
+  // a help request shows the person what was tried: the gate's own list, else the client's record of failed methods
+  const askPerson = async (p: any, signal?: AbortSignal) => {
+    try {
+      const m = p?._meta?.[GG];
+      const k = String(m?.kind || "");
+      if ((k === "ask_help" || k === "help") && progress.failures.length && !(Array.isArray(m?.tried) && m.tried.length))
+        p = { ...p, _meta: { ...p._meta, [GG]: { ...m, client_tried: secrets.any(progress.recentFailures(4)) } } };
+    } catch {}
+    return human.ask(p, signal);
+  };
+  const mcp = new McpClient(freeze.wrap(askPerson), VERSION);
   const plan = new PlanTracker();
   const reminder = new Reminder(plan);
   const facts = new TaskFacts();
   const guard = new ActionGuard();
+  const freshMs = env.GUI_PI_FRESH_MS !== undefined && env.GUI_PI_FRESH_MS !== "" ? Math.max(0, Number(env.GUI_PI_FRESH_MS) || 0) : FRESH_MS;
+  const obsT = new ObsTracker({ freshMs });
+  const platform = new PlatformHealth();
+  const latencyFile = env.GUI_PI_LATENCY_LOG || (env.GUI_PI_GATE_LOG ? join(dirname(env.GUI_PI_GATE_LOG), LATENCY_FILE) : "");
+  const latency = new LatencyBook(latencyFile || null);
   const usage = new UsageBook();
   const skills = new SkillIndex();
   const snapWin = new Map<string, string>(); // snapshot id -> "pid:window_id"
@@ -100,13 +135,24 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
     if (!images) images = new ImageStore(mkdtempSync(join(tmpdir(), "gui-pi-images-")));
     return images;
   };
-  facts.setRequest(env.GUI_PI_TASK || "");
+  facts.addUserMessage(env.GUI_PI_TASK || "", "initial");
   const save = (type: string, data: any) => {
     try {
       pi.appendEntry(type, secrets.any(data));
     } catch {}
   };
   const saveFacts = () => save(ENTRY_TYPE, facts.toJSON());
+  const saveProgress = () => save(PROGRESS_ENTRY, progress.toJSON());
+  /** Every user message of the shell's trusted task file (read only; the extension never writes it). */
+  const syncTaskFile = () => {
+    const f = env.GUI_PI_TASK_FILE;
+    if (!f) return false;
+    try {
+      return facts.syncTaskFile(readFileSync(f, "utf8"));
+    } catch {
+      return false;
+    }
+  };
   const notify = (msg: string, level: string) => {
     const m = secrets.text(msg);
     try {
@@ -189,33 +235,60 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
     return { wkey, obs };
   };
 
-  /** The read gate_next_step asked for, as a custom message (kept in the session like a tool result's read). */
+  /** The read gate_next_step asked for (or the client's own anchor read), as a custom message (kept in the session
+   *  like a tool result's read). Skipped when the focused window's newest observation is still fresh. */
   const attachment = async () => {
     if (guard.stopped || mcp.closed) return null;
-    const a = await nextStep.before(focusOf(focusKey));
+    const f = focusOf(focusKey);
+    const anchor = f ? obsT.anchorReason(focusKey) : null;
+    const a = await nextStep.before(f, { fresh: (shot) => obsT.isFresh(focusKey, shot), anchor,
+                                         listWindows: !!anchor && anchor.startsWith("a person") });
     if (!a || !a.content.length) return null;
-    let details: any = { decision_id: a.decision.decision_id, observe: a.decision.observe, extra_reason: a.decision.extra_reason };
+    let details: any = { decision_id: a.decision.decision_id, observe: a.decision.observe, extra_reason: a.decision.extra_reason,
+                         ...(a.anchor ? { anchor: a.anchor } : {}) };
     let content = a.content;
     if (a.read) {
       const sc = a.read.structuredContent || {};
-      const f = focusOf(focusKey);
       const { wkey, obs } = learnWindow("get_window_state", f || {}, sc, textItems(a.read));
       const ing = ingest(content, wkey || "?", "get_window_state");
       content = ing.content;
       details = { ...details, obs, windowKey: wkey, images: ing.ids };
+      obsT.onObservation(wkey || focusKey, obs, ing.ids.length > 0);
       guard.onRead();
+      platform.reset();
+      if (progress.onResult({ tool: "get_window_state", args: f || {}, status: "done", isError: false, refused: false, action: false,
+                              observed: true, why: "", sc })) saveProgress();
     }
     return { customType: OBSERVE_TYPE, content: secrets.content(content), display: false, details };
   };
 
-  pi.on("turn_start", async () => freeze.newTurn());
+  pi.on("turn_start", async () => {
+    freeze.newTurn();
+    latency.onTurnStart();
+    if (syncTaskFile()) saveFacts();
+  });
+  pi.on("before_provider_request", async () => {
+    latency.onProviderRequest();
+  });
+  pi.on("message_update", async (event: any) => {
+    latency.onUpdate(event?.message);
+  });
   pi.on("message_end", async (event: any) => {
-    usage.onAssistant(event?.message);
+    const m = event?.message;
+    usage.onAssistant(m);
+    latency.onEnd(m);
+    // every message the user writes (the first request and each later correction) is kept verbatim
+    if (m?.role === "user" && facts.addUserMessage(secrets.text(userText(m)), "session")) saveFacts();
+  });
+  pi.on("input", async (event: any) => {
+    if (typeof event?.text === "string" && facts.addUserMessage(secrets.text(event.text), "input")) saveFacts();
+    return { action: "continue" };
   });
   pi.on("tool_call", async (event: any) => {
     const name = String(event?.toolName || "");
     // Stop first (holds every tool), then a person answering, then the unknown / done-by-person holds
-    const why = guard.stopped ? guard.check(name, gateTools, event?.input) : freeze.check(name, gateTools) || guard.check(name, gateTools, event?.input);
+    const why = guard.stopped ? guard.check(name, gateTools, event?.input)
+      : freeze.check(name, gateTools) || guard.check(name, gateTools, event?.input) || platform.check(name, gateTools);
     if (why) return { block: true, reason: why };
   });
 
@@ -236,6 +309,16 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
 
         const st = interpret(name, params, r);
         guard.onResult(name, st.status, !!r.isError, params, !!obs);
+        const isAction = gateTools.has(name) && !READ_TOOLS.has(name) && name !== "request_human";
+        const nImages = (r.content || []).filter((c: any) => c?.type === "image").length;
+        // one freshness judgement: an observation in any result counts; an action without one makes its window stale
+        if (obs) obsT.onObservation(wkey, obs, nImages > 0);
+        else if (isAction && st.executed !== false) obsT.onAction(wkey);
+        if (st.status === "unknown") obsT.force(wkey || focusKey, "an earlier outcome is unknown");
+        // a person acted: re-read the affected state (the window and the window list) before the next turn; the
+        // original action is never replayed
+        if (st.byPerson) obsT.force(wkey || focusKey, "a person acted (takeover / did it themselves)");
+        const pnote = platform.onResult(name, text, !!r.isError, st.status, st.byPerson);
         const before = plan.counts();
         if (name === "set_plan") plan.update(params);
         let changed = false;
@@ -246,16 +329,26 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         if (typeof sc.answer === "string" && sc.answer.trim()) changed = facts.addAnswer(`answered: ${sc.answer}`) || changed;
         else if (text.startsWith("[human via")) changed = facts.addAnswer(text.split("\n")[0]) || changed;
         for (const f of filesOf(sc)) changed = facts.addFile(f) || changed;
+        // check_done's "no gap" is a model's judgement, not environment proof: recorded as a check, not as evidence
         if (name === "check_done" && Array.isArray(sc.gaps) && sc.gaps.length === 0 && !r.isError)
-          changed = facts.addFact("check_done found no open gaps", "check_done (gate)", true) || changed;
+          changed = facts.addFact("check_done reported no open gaps (a model's judgement; not proof from the environment that the task succeeded)",
+                                  "check_done (gate)", false, undefined, "check") || changed;
+        // gate v0.10.3 postconditions: only a met one is evidence from the environment
+        for (const p of postconditions(sc)) if (p.met === true)
+          changed = facts.addFact(`${p.what}${p.detail ? `: ${p.detail}` : ""}`, `postcondition checked by the gate after ${name}`, true, undefined, "tool_evidence") || changed;
         if (changed) saveFacts();
+        if (name === "set_plan") progress.setPlan(plan.milestones);
+        if (progress.onResult({ tool: name, args: params, status: st.status, isError: !!r.isError, refused: st.refused, action: isAction,
+                                observed: !!obs, why: text.split("\n")[0].slice(0, 200), sc, steps: st.steps, human: st.human, choice: st.choice,
+                                platform: platform.current ? PLATFORM_CONSTRAINT[platform.current] : null }) || name === "set_plan") saveProgress();
 
         const notes = [...st.notes];
+        if (pnote) notes.push(pnote);
         const dn = diffNote(sc.diff);
         if (dn) notes.push(dn);
         const rem = reminder.onResult({
           tool: name,
-          action: gateTools.has(name) && !READ_TOOLS.has(name) && name !== "request_human",
+          action: isAction,
           refused: st.refused,
           ...(name === "set_plan" ? { before, after: plan.counts() } : {}),
         });
@@ -269,7 +362,8 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
         return { content: secrets.content(content.length ? content : [{ type: "text", text: "(no output)" }]),
                  isError: !!r.isError,
                  details: secrets.any({ windowKey: wkey, gateError: !!r.isError, status: st.status, executed: st.executed,
-                            next_action: st.nextAction, human_outcome: st.human, human_choice: st.choice, steps: st.steps, obs, images: ing.ids, gate: sc.gate || null }) };
+                            next_action: st.nextAction, human_outcome: st.human, human_choice: st.choice, steps: st.steps, obs, images: ing.ids, gate: sc.gate || null,
+                            continuation_id: st.continuation, platform: platform.current }) };
       },
     });
   }
@@ -363,8 +457,10 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
     const sm = ctx?.sessionManager;
     try {
       facts.restore(sm?.getBranch?.() || []);
+      progress.restore(sm?.getBranch?.() || []);
     } catch {}
-    facts.setRequest(env.GUI_PI_TASK || "");
+    facts.addUserMessage(env.GUI_PI_TASK || "", "initial");
+    syncTaskFile();
     try {
       const file = sm?.getSessionFile?.();
       const base = file ? dirname(file) : sm?.getSessionDir?.();
@@ -395,27 +491,33 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
   });
 
   pi.on("context", async (event: any) => {
-    return { messages: prune(event.messages, { pinned: new Set(imageStore().pins.map((p) => p.id)) }) };
+    const messages = prune(event.messages, { pinned: new Set(imageStore().pins.map((p) => p.id)) });
+    latency.onContext(messages);
+    return { messages };
   });
 
   pi.on("session_before_compact", async (event: any) => {
     const prep = event.preparation || {};
-    if (!facts.request) {
-      const firstUser = (event.branchEntries || []).map((e: any) => e?.message).find((m: any) => m?.role === "user");
-      if (firstUser) facts.setRequest(textOf(firstUser).slice(0, 2000));
+    // every user message on the branch, verbatim and in full (0.3.1 kept only the first one, cut to 2000 characters)
+    syncTaskFile();
+    for (const m of (event.branchEntries || []).map((e: any) => e?.message)) {
+      if (m?.role === "user") facts.addUserMessage(secrets.text(userText(m)), "session");
     }
+    saveFacts();
     reminder.afterCompaction();
+    obsT.onCompaction();
     const pins = imageStore().pins;
     const parts = [
       "[gui-pi compaction] Older window reads were dropped; the gate still holds this run's state (refused effects, history). " +
         "Everything below is kept word for word by the program.",
       facts.render(),
       plan.summary(),
+      progress.render(),
       pins.length ? "Pinned evidence (recall_image shows it): " + pins.map((p) => `${p.id} "${p.label}"`).join("; ") : "",
       lastWindow ? `Last window seen: "${lastWindow}". Read it again before the next action.` : "Read the window again before the next action.",
     ].filter(Boolean);
     return { compaction: { summary: secrets.text(parts.join("\n\n")), firstKeptEntryId: prep.firstKeptEntryId, tokensBefore: prep.tokensBefore,
-                           details: { facts: secrets.any(facts.toJSON()) } } };
+                           details: { facts: secrets.any(facts.toJSON()), progress: secrets.any(progress.toJSON()) } } };
   });
 
   pi.on("session_shutdown", async () => {
@@ -423,7 +525,7 @@ export default async function (pi: any, envOverride?: NodeJS.ProcessEnv) {
     mcp.close();
   });
 
-  return { mcp, guard, images: imageStore, nextStep, reset, onStop, secrets };
+  return { mcp, guard, images: imageStore, nextStep, reset, onStop, secrets, facts, progress, obs: obsT, latency, platform };
 }
 
 export { obsKind, CLIENT_ONLY_TOOLS };

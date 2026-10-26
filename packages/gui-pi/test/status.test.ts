@@ -8,7 +8,7 @@ const R = (sc: any, text = "ok", isError = false) => ({ content: [{ type: "text"
 test("unknown: the model is told to re-read, nothing is retried", () => {
   const i = interpret("click", {}, R({ status: "unknown" }, "[gate] driver timed out", true));
   assert.equal(i.executed, "unknown");
-  assert.match(i.notes.join(), /OUTCOME UNKNOWN.*Do not send it again.*get_window_state/);
+  assert.match(i.notes.join(), /RESULT UNKNOWN.*Do not resend it directly.*get_window_state/);
 });
 
 test("partial: how many batch steps ran (current gate batch.executed, newer names too)", () => {

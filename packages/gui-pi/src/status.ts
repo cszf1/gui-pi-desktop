@@ -3,6 +3,15 @@
 // (status unknown | input_required, human_outcome, diff) and gate v0.10.2 (human_choice, human_outcome task_changed /
 // late / void / not_asked_again / expired, tier write_args and freeze; the reviewer's words are never returned). The status decides, never the "[gate]" text prefix.
 // Nothing here retries anything: an unknown outcome is reported, and the model must re-read before acting.
+//
+// gate v0.10.3 (expected; parsed forward-compatibly, every field optional - when one is missing the 0.3.1 behaviour
+// holds): a unified execution state on every tool result
+//   status            done | partial | unknown | input_required | done_by_person | blocked  (older: executed)
+//   continuation_id   id of the decision / batch the next call continues (aliases: resume_id, continue_id, state.*)
+//   completed         indices of the run_actions steps that ran (0-based; aliases: completed_indices, batch.completed,
+//                     state.completed); with it the client says exactly which steps did NOT run
+//   postconditions    [{what, met: true|false|null, detail}] evidence the gate checked after the step (aliases:
+//                     postcondition, evidence, state.postconditions); only met:true counts as evidence
 
 export type HumanOutcome =
   | "declined" | "cancelled" | "timed_out" | "closed" | "unavailable"
@@ -47,10 +56,27 @@ export type Interp = {
   /** a person is answering a gate question right now (gate freeze): nothing was sent, wait for them */
   waitingPerson: boolean;
   refused: boolean;
-  steps: { ran: number; total: number | null } | null;
+  steps: { ran: number; total: number | null; completed?: number[]; notRun?: number[] } | null;
+  /** gate v0.10.3: the id the next call continues from (null: not given) */
+  continuation: string | null;
   /** client notes appended to the result for the model */
   notes: string[];
 };
+
+/** gate v0.10.3 continuation id, read tolerantly (null when the gate gives none). */
+export function continuationOf(sc: any): string | null {
+  const v = sc?.continuation_id ?? sc?.resume_id ?? sc?.continue_id ?? sc?.state?.continuation_id ?? sc?.state?.resume_id ?? null;
+  return v === null || v === undefined || v === "" ? null : String(v).slice(0, 120);
+}
+
+/** gate v0.10.3 indices of the batch steps that ran (0-based), or null when the gate does not say. */
+export function completedOf(sc: any): number[] | null {
+  const raw = sc?.completed ?? sc?.completed_indices ?? sc?.batch?.completed ?? sc?.batch?.completed_indices ?? sc?.state?.completed ?? null;
+  if (!Array.isArray(raw)) return null;
+  const base = Number(sc?.index_base ?? sc?.batch?.index_base ?? 0) === 1 ? 1 : 0;
+  const out = raw.map((x: any) => Number(typeof x === "object" && x ? x.index ?? x.i : x)).filter((n: number) => Number.isInteger(n) && n - base >= 0).map((n: number) => n - base);
+  return [...new Set(out)].sort((a, b) => a - b);
+}
 
 function normHuman(v: any, voided = false): HumanOutcome | null {
   if (v === null || v === undefined || v === false) return null;
@@ -108,23 +134,31 @@ export function interpret(name: string, params: any, r: { content?: any[]; isErr
   const executed: boolean | "unknown" =
     status === "blocked" || status === "input_required" || status === "done_by_person" ? false : status === "unknown" ? "unknown" : true;
   let steps: Interp["steps"] = null;
+  const continuation = continuationOf(sc);
+  const completed = completedOf(sc);
 
   if (status === "unknown") {
-    notes.push("[client: OUTCOME UNKNOWN - this step may or may not have happened. Do not send it again. " +
-      "Read the window first (get_window_state) and decide from what it shows; actions are held until you do.]");
+    notes.push("[client: RESULT UNKNOWN - this step may or may not have happened. Do not resend it directly (not even reworded). " +
+      "Read the window first (get_window_state) and decide from what it shows; actions are held until you do." +
+      (completed ? ` Batch steps known to have run: ${completed.map((i) => i + 1).join(", ") || "none"}; the others are unknown.` : "") + "]");
   } else if (status === "partial") {
     const b = sc.batch || {};
-    const ran = num(b.executed) ?? num(sc.completed_steps) ?? num(sc.steps_completed) ?? 0;
     const total = num(b.total) ?? num(sc.steps_total) ?? num(sc.total_steps) ?? (Array.isArray(params?.steps) ? params.steps.length : null);
-    steps = { ran, total };
+    const ran = completed ? completed.length : num(b.executed) ?? num(sc.completed_steps) ?? num(sc.steps_completed) ?? 0;
+    const notRun = completed && total !== null ? Array.from({ length: total }, (_, i) => i).filter((i) => !completed.includes(i)) : undefined;
+    steps = completed ? { ran, total, completed, ...(notRun ? { notRun } : {}) } : { ran, total };
     const why = b.stopped ? ` (stopped: ${String(typeof b.stopped === "object" ? JSON.stringify(b.stopped) : b.stopped).slice(0, 160)})` : "";
+    const which = completed
+      ? `Steps that ran: ${completed.map((i) => i + 1).join(", ") || "none"}${notRun ? `; steps that did NOT run: ${notRun.map((i) => i + 1).join(", ") || "none"}` : ""} (1-based).`
+      : `Steps after step ${ran} did NOT run.`;
     notes.push(`[client: run_actions ran ${ran}${total !== null ? ` of ${total}` : ""} steps${why}. ` +
-      `Steps after step ${ran} did NOT run; continue from the window shown, do not resend the steps that ran.]`);
+      `${which} Continue from the window shown, do not resend the steps that ran.]`);
   } else if (status === "input_required") {
     notes.push("[client: this step needs a person and nothing was executed.]");
   } else if (status === "done_by_person") {
-    notes.push("[client: A PERSON DID THIS STEP themselves. Do not send it again (it is held if you do). " +
-      "Read the window as it is now (the attached read, or get_window_state) and continue from there.]");
+    notes.push("[client: A PERSON DID THIS STEP themselves. Do not send it again and do not replay it another way (it is held if you do). " +
+      "They may have changed more than this step (another window, a file, the focus): re-read the affected state first - the client " +
+      "reads the window again before your next turn - and continue from what it shows.]");
   }
   if (status === "blocked" && nextAction === "rethink") {
     notes.push("[client: the gate asks you to RETHINK: nothing was executed. Do not resend this step or a reworded copy of it. " +
@@ -157,7 +191,9 @@ export function interpret(name: string, params: any, r: { content?: any[]; isErr
     && (["deny", "ask_human", "handoff", "stop_loop", "ask_help"].includes(String(g.decision)) || ["review", "write_args"].includes(String(g.tier)));
   const refused = (status === "blocked" || status === "input_required") && !waitingPerson && choice !== "another_way" &&
     (!!human || !!gateRefusal || (!g && /refus|declin|risk|denied/i.test(text)));
-  return { status: waitingPerson ? "waiting_person" : status, nextAction, byPerson, executed, human, choice, waitingPerson, refused, steps, notes };
+  if (continuation && (status === "partial" || status === "unknown" || status === "input_required" || status === "blocked"))
+    notes.push(`[client: the gate's continuation id for this step is ${continuation}; it names this decision, it authorises nothing.]`);
+  return { status: waitingPerson ? "waiting_person" : status, nextAction, byPerson, executed, human, choice, waitingPerson, refused, steps, continuation, notes };
 }
 
 /** A short description of a refused effect, for the task facts (structured when the gate gives one). */

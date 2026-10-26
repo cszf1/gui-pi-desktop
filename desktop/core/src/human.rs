@@ -7,7 +7,10 @@
 //! The shell shows a native popup per request (one at a time) and maps the button to the kind's form.
 //! Four strict result types share one popup component (`view`): approve {decision}, clarify {answer} (the gate's
 //! "answer" form), takeover {done}, help {choice, note} (the gate's "ask_help" form). Per task the service records
-//! what asking cost the person (`Metrics`) and writes it to the session log (`human.jsonl`) for bench/human_pilot.py.
+//! what asking cost the person (`Metrics`) and writes it to the session log (`human.jsonl`) for bench/human_pilot.py:
+//! per question `wait_s` (popup shown until it ended) and `active_s` (only what the popup measured from the person's
+//! own input; missing when there was no such evidence, e.g. a takeover done in other windows - then `active_upper_s`
+//! is the bound). Waiting is never counted as operating time (schema gui-pi-human/2).
 //! A wrong token, an unknown kind, a closed popup, the app quitting or the deadline passing is never an approval;
 //! every refusal carries its reason (declined / cancelled / timed_out / closed / unavailable). Each request id is
 //! answered once: a repeated id is refused without a popup, and only the first click on a popup counts.
@@ -21,6 +24,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const KINDS: &[&str] = &["approve", "answer", "takeover", "ask_help", "clarify", "help"];
+/// A clarify popup shows at most this many options (the ones that differ); more can be typed.
+pub const MAX_OPTIONS: usize = 4;
+/// A takeover popup lists at most this many steps (the minimal ones); the rest are counted.
+pub const MAX_STEPS: usize = 5;
 
 /// The gate's form for a kind (clarify uses the answer form, help the ask_help form).
 pub fn form_of(kind: &str) -> &'static str {
@@ -84,6 +91,33 @@ pub enum Outcome {
     Cancelled,
     /// no popup could be shown (no window, the service is shutting down)
     Unavailable,
+}
+
+/// What the popup measured of the person's own activity (evidence: key presses, clicks, typing, scrolling or pointer
+/// movement inside the popup). `active_s` is None when there was no evidence before the answer (or the work happened
+/// outside the popup, as in a takeover): the person's active time is then unknown, never the waiting time.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Activity {
+    pub active_s: Option<f64>,
+    /// "input" (measured inside the popup) | "outside_popup" (takeover: the work is done in other windows) |
+    /// "answer_only" (the answering click was the only evidence) | "none" | "" (not reported: auto / older popup)
+    pub evidence: String,
+}
+
+impl Activity {
+    /// What the popup reported (seconds from its first evidence of input to the answer / the end).
+    pub fn from_popup(kind: &str, active_ms: Option<f64>, evidence: Option<&str>) -> Activity {
+        let ev = evidence.unwrap_or("").to_string();
+        if form_of(kind) == "takeover" {
+            return Activity { active_s: None, evidence: "outside_popup".into() };
+        }
+        let a = active_ms.filter(|m| m.is_finite() && *m >= 0.0).map(|m| (m / 100.0).round() / 10.0);
+        match ev.as_str() {
+            "input" => Activity { active_s: a, evidence: ev },
+            "answer_only" | "none" => Activity { active_s: None, evidence: ev },
+            _ => Activity { active_s: None, evidence: String::new() },
+        }
+    }
 }
 
 /// The reason a refusal is recorded with, as the gate and the extension name it. None: the person answered.
@@ -206,15 +240,22 @@ pub fn view(req: &Request) -> Value {
                     }
                 }
             };
-            v["object"] = json!(object);
-            v["scope"] = json!(scope);
-            v["consequence"] = json!(consequence);
+            v["object"] = json!(object.clone());
+            v["scope"] = json!(scope.clone());
+            v["consequence"] = json!(consequence.clone());
             v["reason"] = json!(s_of(&m, &["reason"]));
+            // what Allow covers, said every time: this one effect only (nothing broader, nothing later)
+            let what = if object.is_empty() { "this step".to_string() } else { format!("\"{object}\"") };
+            v["only"] = json!(format!("Allow approves only this one effect: {what}{}. It does not approve other targets, other content,                 later steps or repeats; the gate asks again for anything else.",
+                if scope.is_empty() { String::new() } else { format!(" ({scope})") }));
+            v["missing"] = json!([("object", &object), ("scope", &scope), ("consequence", &consequence)].iter()
+                .filter(|(_, x)| x.is_empty()).map(|(k, _)| *k).collect::<Vec<_>>());
             v["buttons"] = json!([{"choice": "no", "label": "Deny"}, {"choice": "yes", "label": "Allow"}]);
         }
         "clarify" => {
+            let mut seen: HashSet<String> = HashSet::new();
             let opts: Vec<Value> = match m.get("options") {
-                Some(Value::Array(a)) => a.iter().take(8).filter_map(|o| match o {
+                Some(Value::Array(a)) => a.iter().filter_map(|o| match o {
                     Value::String(s) => Some(json!({"label": s, "value": s, "effect": ""})),
                     Value::Object(x) => {
                         let label = x.get("label").or(x.get("text")).or(x.get("value")).and_then(|t| t.as_str())?;
@@ -224,21 +265,40 @@ pub fn view(req: &Request) -> Value {
                                     "effect": eff.chars().take(240).collect::<String>()}))
                     }
                     _ => None,
-                }).collect(),
+                })
+                // only options that differ in what they lead to: the same value (case / spaces aside) is one option
+                .filter(|o| seen.insert(o["value"].as_str().unwrap_or("").to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")))
+                .collect(),
                 _ => vec![],
             };
-            v["free_text"] = json!(opts.is_empty() || m.get("allow_other").and_then(|b| b.as_bool()).unwrap_or(true));
+            let more = opts.len() > MAX_OPTIONS;
+            let opts: Vec<Value> = opts.into_iter().take(MAX_OPTIONS).collect();
+            // more options than fit: the rest can still be typed
+            v["free_text"] = json!(opts.is_empty() || more || m.get("allow_other").and_then(|b| b.as_bool()).unwrap_or(true));
             v["options"] = json!(opts);
             v["buttons"] = json!([{"choice": "no", "label": "Don't answer"}]);
         }
         "takeover" => {
-            v["steps"] = json!(strs(m.get("steps").or(m.get("todo")), 8));
+            let all = strs(m.get("steps").or(m.get("todo")), 50);
+            v["more_steps"] = json!(all.len().saturating_sub(MAX_STEPS));
+            v["steps"] = json!(all.into_iter().take(MAX_STEPS).collect::<Vec<_>>());
             v["paused"] = json!("The agent's input is paused until you answer.");
-            v["note"] = json!("Done tells the agent you did it; it will not repeat the step.");
+            v["note"] = json!("Done tells the agent you did it: it first re-reads the window (and what you may have changed), \
+                and it will not repeat or replay its own step.");
             v["buttons"] = json!([{"choice": "no", "label": "I won't do it"}, {"choice": "yes", "label": "Done"}]);
         }
         "help" => {
-            v["tried"] = json!(strs(m.get("tried").or(m.get("tried_methods")).or(m.get("attempts")), 6));
+            let gate_tried = strs(m.get("tried").or(m.get("tried_methods")).or(m.get("attempts")), 6);
+            // the gate's own list; else what the extension recorded as failed methods (labelled as such)
+            let (tried, src) = if !gate_tried.is_empty() { (gate_tried, "gate") } else {
+                let c = strs(m.get("client_tried"), 6);
+                let s = if c.is_empty() { "" } else { "agent log" };
+                (c, s)
+            };
+            v["tried"] = json!(tried);
+            v["tried_source"] = json!(src);
+            v["choices"] = json!("Give a hint: the agent tries another way using your hint. I did it for you: you do the step, \
+                the agent re-reads and continues without repeating it.");
             v["reason"] = json!(s_of(&m, &["reason"]));
             v["hint"] = json!(true);
             v["buttons"] = json!([{"choice": "no", "label": "Give a hint"}, {"choice": "yes", "label": "I did it for you"}]);
@@ -257,15 +317,23 @@ pub struct QuestionRec {
     pub ty: String,
     pub outcome: String,
     pub refused: bool,
-    pub secs: f64,
+    /// popup shown until it ended (answer, timeout, close): waiting time, never operating time
+    pub wait_s: f64,
+    /// the person's active time with evidence (Activity); None = missing
+    pub active_s: Option<f64>,
+    /// how active_s was obtained (Activity::evidence)
+    pub evidence: String,
     pub repeated: bool,
     pub takeover_steps: usize,
 }
 
 /// Per task: what asking cost the person. Nothing of this is shown beyond the brief timeline entry per question.
-///   person_active_s  popup up until the person answered (read, decide, do the takeover / help step)
-///   person_wait_s    task wall time with no question open (the person only watches the agent)
-///   agent_blocked_s  every second a question was open, answered or not
+///   person_active_s        sum of the measured active_s (evidence of the person's own input only)
+///   person_active_missing  questions without such evidence (their active time is unknown)
+///   person_active_upper_s  sum of wait_s of those questions: an upper bound on their active time
+///   question_wait_s        every second a popup was shown (= the person may have been reading / acting / away)
+///   no_question_s          task wall time with no question open (the person only watches the agent)
+///   agent_blocked_s        every second a question was open, answered or not (equals question_wait_s here)
 pub struct Metrics {
     pub task_id: String,
     started: Instant,
@@ -282,6 +350,9 @@ impl Metrics {
         format!("{ty}:{}", m.split_whitespace().collect::<Vec<_>>().join(" "))
     }
     pub fn record(&mut self, kind: &str, message: &str, meta: &Value, o: &Outcome, secs: f64) -> QuestionRec {
+        self.record_with(kind, message, meta, o, secs, &Activity::default())
+    }
+    pub fn record_with(&mut self, kind: &str, message: &str, meta: &Value, o: &Outcome, secs: f64, act: &Activity) -> QuestionRec {
         let ty = type_of(kind).to_string();
         // a question that expired in the queue was never seen by the person: it does not make the next identical
         // question a repeat (round 1 marked it so); it is itself a repeat only of one that was shown
@@ -289,25 +360,33 @@ impl Metrics {
         let repeated = if matches!(o, Outcome::Expired) { self.seen.contains(&key) } else { !self.seen.insert(key) };
         let (word, refused) = label(kind, o);
         let takeover_steps = if ty == "takeover" { strs(meta.get("steps").or(meta.get("todo")), 50).len().max(1) } else { 0 };
-        let r = QuestionRec { ty, outcome: word.into(), refused, secs: (secs * 10.0).round() / 10.0, repeated, takeover_steps };
+        let r1 = |x: f64| (x * 10.0).round() / 10.0;
+        let wait = r1(secs);
+        // never more active than the popup was up
+        let active = act.active_s.map(|a| r1(a.min(wait)));
+        let r = QuestionRec { ty, outcome: word.into(), refused, wait_s: wait, active_s: active,
+                              evidence: if act.evidence.is_empty() { "none".into() } else { act.evidence.clone() }, repeated, takeover_steps };
         self.recs.push(r.clone());
         r
     }
     pub fn summary(&self, end: &str) -> Value {
         let total = self.started.elapsed().as_secs_f64();
-        let open: f64 = self.recs.iter().map(|r| r.secs).sum();
-        let active: f64 = self.recs.iter().filter(|r| !matches!(r.outcome.as_str(), "timed out" | "expired" | "cancelled" | "unavailable")).map(|r| r.secs).sum();
+        let open: f64 = self.recs.iter().map(|r| r.wait_s).sum();
+        let active: f64 = self.recs.iter().filter_map(|r| r.active_s).sum();
+        let missing: Vec<&QuestionRec> = self.recs.iter().filter(|r| r.active_s.is_none()).collect();
+        let upper: f64 = missing.iter().map(|r| r.wait_s).sum();
         let count = |w: &str| self.recs.iter().filter(|r| r.outcome == w).count();
         let mut by_type = serde_json::Map::new();
         for t in ["approve", "clarify", "takeover", "help"] {
             by_type.insert(t.into(), json!(self.recs.iter().filter(|r| r.ty == t).count()));
         }
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
-        json!({"ev": "human_summary", "schema": "gui-pi-human/1", "task": self.task_id, "end": end,
+        json!({"ev": "human_summary", "schema": HUMAN_SCHEMA, "task": self.task_id, "end": end,
                "asks": self.recs.len(), "by_type": by_type,
                "repeated": self.recs.iter().filter(|r| r.repeated).count(),
                "repeated_ratio": if self.recs.is_empty() { 0.0 } else { r1(self.recs.iter().filter(|r| r.repeated).count() as f64 / self.recs.len() as f64 * 100.0) / 100.0 },
-               "person_active_s": r1(active), "person_wait_s": r1((total - open).max(0.0)), "agent_blocked_s": r1(open),
+               "person_active_s": r1(active), "person_active_missing": missing.len(), "person_active_upper_s": r1(upper),
+               "question_wait_s": r1(open), "no_question_s": r1((total - open).max(0.0)), "agent_blocked_s": r1(open),
                "takeover_steps": self.recs.iter().map(|r| r.takeover_steps).sum::<usize>(),
                "cancelled": count("cancelled") + count("window closed"), "timed_out": count("timed out"), "expired": count("expired"),
                "declined": count("declined"), "unavailable": count("unavailable"), "task_s": r1(total)})
@@ -315,6 +394,9 @@ impl Metrics {
 }
 
 pub type LogSink = Box<dyn Fn(&Value) + Send + Sync>;
+/// The person-metrics log schema (2: wait_s / active_s per question; 1 had one `secs` counted as active time). Lines
+/// still carry `secs` (= wait_s, the popup time it always was) for readers written against 1.
+pub const HUMAN_SCHEMA: &str = "gui-pi-human/2";
 /// One Stop request to a watching extension; it answers Some(reset) after its ack, None without one.
 type StopReq = Sender<Option<bool>>;
 
@@ -325,6 +407,8 @@ type StopReq = Sender<Option<bool>>;
 pub struct Pending {
     open: Mutex<HashMap<String, Sender<Outcome>>>,
     used: Mutex<HashSet<String>>,
+    /// what each popup measured of the person's activity (reported with its answer)
+    activity: Mutex<HashMap<String, Activity>>,
 }
 
 impl Pending {
@@ -345,6 +429,16 @@ impl Pending {
             Some(tx) => tx.send(o).is_ok(),
             None => false,
         }
+    }
+    /// Keep what a popup measured (only while its question is open; the first report counts).
+    pub fn note_activity(&self, id: &str, a: Activity) {
+        if self.is_open(id) {
+            self.activity.lock().unwrap_or_else(|e| e.into_inner()).entry(id.to_string()).or_insert(a);
+        }
+    }
+    /// What the popup measured (default: nothing reported).
+    pub fn take_activity(&self, id: &str) -> Activity {
+        self.activity.lock().unwrap_or_else(|e| e.into_inner()).remove(id).unwrap_or_default()
     }
     pub fn is_open(&self, id: &str) -> bool {
         self.open.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id)
@@ -400,12 +494,14 @@ pub fn new_token() -> String {
 
 /// Shows a popup and blocks until the person answers or `seconds` pass.
 pub type Popup = Arc<dyn Fn(&Request, f64) -> Outcome + Send + Sync>;
+/// The same, also returning what the popup measured of the person's activity (the shell's real popups).
+pub type PopupEx = Arc<dyn Fn(&Request, f64) -> (Outcome, Activity) + Send + Sync>;
 
 /// The service behind the socket: token, popup, one question at a time, seen request ids, the gate's settings
 /// for the current task (handed over once), and a closing flag (app quitting: every request is cancelled).
 pub struct Service {
     token: String,
-    popup: Popup,
+    popup: PopupEx,
     serial: Mutex<()>,
     seen: Mutex<HashSet<String>>,
     gate_env: Mutex<Option<Vec<(String, String)>>>,
@@ -419,6 +515,10 @@ pub struct Service {
 
 impl Service {
     pub fn new(token: String, popup: Popup) -> Arc<Service> {
+        Service::new_ex(token, Arc::new(move |r: &Request, s: f64| (popup(r, s), Activity::default())))
+    }
+    /// A service whose popup also reports the person's activity (wait_s / active_s per question).
+    pub fn new_ex(token: String, popup: PopupEx) -> Arc<Service> {
         Arc::new(Service { token, popup, serial: Mutex::new(()), seen: Mutex::new(HashSet::new()), gate_env: Mutex::new(None),
                            closing: AtomicBool::new(false), metrics: Mutex::new(None), log: Mutex::new(None), notify: Mutex::new(None),
                            watchers: Mutex::new(vec![]) })
@@ -539,9 +639,9 @@ impl Service {
             let rec = self.metrics.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
                 .map(|m| (m.task_id.clone(), m.record(&req.kind, &req.message, &req.meta, &o, 0.0)));
             if let Some((task, r)) = rec {
-                self.write_log(&json!({"ev": "human_q", "schema": "gui-pi-human/1", "task": task, "type": r.ty, "outcome": r.outcome,
-                                       "refused": r.refused, "secs": r.secs, "repeated": r.repeated, "takeover_steps": r.takeover_steps,
-                                       "shown": false}));
+                self.write_log(&json!({"ev": "human_q", "schema": HUMAN_SCHEMA, "task": task, "type": r.ty, "outcome": r.outcome,
+                                       "refused": r.refused, "wait_s": r.wait_s, "secs": r.wait_s, "active_s": r.active_s, "evidence": r.evidence,
+                                       "repeated": r.repeated, "takeover_steps": r.takeover_steps, "shown": false}));
             }
             self.notify(&json!({"kind": req.kind, "message": req.message, "outcome": "expired", "refused": true, "reason": "expired"}));
             let mut r = to_elicit(&req.kind, &o);
@@ -549,15 +649,16 @@ impl Service {
             return r;
         }
         let t0 = Instant::now();
-        let mut o = (self.popup)(&req, left);
+        let (mut o, act) = (self.popup)(&req, left);
         if t0.elapsed() > Duration::from_secs_f64(left + 1.0) && !matches!(o, Outcome::Cancelled) {
             o = Outcome::Timeout;
         }
         let rec = self.metrics.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
-            .map(|m| (m.task_id.clone(), m.record(&req.kind, &req.message, &req.meta, &o, t0.elapsed().as_secs_f64())));
+            .map(|m| (m.task_id.clone(), m.record_with(&req.kind, &req.message, &req.meta, &o, t0.elapsed().as_secs_f64(), &act)));
         if let Some((task, r)) = rec {
-            self.write_log(&json!({"ev": "human_q", "schema": "gui-pi-human/1", "task": task, "type": r.ty, "outcome": r.outcome,
-                                   "refused": r.refused, "secs": r.secs, "repeated": r.repeated, "takeover_steps": r.takeover_steps}));
+            self.write_log(&json!({"ev": "human_q", "schema": HUMAN_SCHEMA, "task": task, "type": r.ty, "outcome": r.outcome,
+                                   "refused": r.refused, "wait_s": r.wait_s, "secs": r.wait_s, "active_s": r.active_s, "evidence": r.evidence,
+                                   "repeated": r.repeated, "takeover_steps": r.takeover_steps}));
         }
         let mut r = to_elicit(&req.kind, &o);
         r["id"] = json!(id);
@@ -891,8 +992,93 @@ mod tests {
         let l = lines.lock().unwrap();
         assert_eq!(l.iter().filter(|v| v["ev"] == "human_q").count(), 5);
         assert_eq!(l.last().unwrap()["ev"], "human_summary");
-        assert!(l.iter().all(|v| v["schema"] == "gui-pi-human/1" && v["task"] == "task-7"));
+        assert!(l.iter().all(|v| v["schema"] == "gui-pi-human/2" && v["task"] == "task-7"));
+        // without activity reports (Popup, not PopupEx) no active time is claimed: all missing, wait is the bound
+        assert_eq!(s["person_active_s"], 0.0);
+        assert_eq!(s["person_active_missing"], 5);
+        assert_eq!(s["person_active_upper_s"], s["question_wait_s"]);
+        assert!(l.iter().filter(|v| v["ev"] == "human_q").all(|v| v["active_s"].is_null() && v["wait_s"].as_f64().unwrap() >= 0.0));
         assert!(svc.end_task("again").is_none());
+    }
+
+    #[test]
+    fn waiting_is_not_operating_time() {
+        // review 2026-10-26 v2 §4: active time only with evidence of the person's input; missing otherwise
+        let lines = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let l2 = lines.clone();
+        let acts = Arc::new(Mutex::new(vec![
+            (Outcome::Yes, Activity::from_popup("approve", Some(1234.0), Some("input"))),
+            (Outcome::Yes, Activity::from_popup("approve", Some(0.0), Some("answer_only"))),
+            (Outcome::Timeout, Activity::from_popup("approve", None, Some("none"))),
+            (Outcome::Yes, Activity::from_popup("takeover", Some(5000.0), Some("input"))),
+            (Outcome::Text("a.ods".into()), Activity::from_popup("clarify", Some(99999.0), Some("input"))),
+        ]));
+        let a2 = acts.clone();
+        let popup: PopupEx = Arc::new(move |r, _| {
+            std::thread::sleep(Duration::from_millis(if r.id == "a0" { 1300 } else { 30 }));
+            a2.lock().unwrap().remove(0)
+        });
+        let svc = Service::new_ex("t".into(), popup);
+        svc.set_log(Box::new(move |v| l2.lock().unwrap().push(v.clone())));
+        svc.begin_task("t9");
+        for (i, k) in ["approve", "approve", "approve", "takeover", "clarify"].iter().enumerate() {
+            svc.handle_line(&json!({"token": "t", "id": format!("a{i}"), "kind": k, "message": format!("q{i}"), "timeout_s": 30}).to_string());
+        }
+        let s = svc.end_task("finished").unwrap();
+        let l = lines.lock().unwrap();
+        let q: Vec<&Value> = l.iter().filter(|v| v["ev"] == "human_q").collect();
+        assert_eq!(q[0]["active_s"], 1.2, "measured from input evidence");
+        assert!(q[1]["active_s"].is_null() && q[1]["evidence"] == "answer_only", "the answering click alone measures nothing");
+        assert!(q[2]["active_s"].is_null() && q[2]["evidence"] == "none");
+        assert!(q[3]["active_s"].is_null() && q[3]["evidence"] == "outside_popup", "a takeover happens in other windows");
+        assert!(q[4]["active_s"].as_f64().unwrap() <= q[4]["wait_s"].as_f64().unwrap(), "never more than the popup was up");
+        assert_eq!(s["person_active_missing"], 3);
+        assert!(s["person_active_s"].as_f64().unwrap() >= 1.2);
+        assert!(s["question_wait_s"].as_f64().unwrap() >= s["person_active_upper_s"].as_f64().unwrap());
+        // Pending keeps one report per open question
+        let p = Pending::default();
+        let rx = p.open("x").unwrap();
+        p.note_activity("x", Activity { active_s: Some(2.0), evidence: "input".into() });
+        p.note_activity("x", Activity { active_s: Some(9.0), evidence: "input".into() });
+        p.note_activity("closed", Activity { active_s: Some(1.0), evidence: "input".into() });
+        assert!(p.answer("x", Outcome::Yes));
+        assert_eq!(p.wait("x", rx, 1.0), Outcome::Yes);
+        assert_eq!(p.take_activity("x").active_s, Some(2.0));
+        assert_eq!(p.take_activity("closed"), Activity::default());
+    }
+
+    #[test]
+    fn popup_contents_per_type_review_v2() {
+        let req = |kind: &str, meta: Value| Request { kind: kind.into(), message: "m".into(), meta, ..Default::default() };
+        // approve: the object, scope and consequence, and that Allow covers only this effect
+        let v = view(&req("approve", json!({"object": "q3.ods", "scope": "1 file in ~/Documents", "consequence": "q3.ods is overwritten"})));
+        let only = v["only"].as_str().unwrap();
+        assert!(only.contains("only this one effect") && only.contains("\"q3.ods\"") && only.contains("1 file in ~/Documents"), "{only}");
+        assert_eq!(v["missing"], json!([]));
+        let v = view(&req("approve", json!({})));
+        assert_eq!(v["missing"], json!(["object", "scope", "consequence"]), "what the gate did not say is named, never invented");
+        assert!(v["only"].as_str().unwrap().contains("this step"));
+        // clarify: a few options that really differ; duplicates by value dropped; overflow can be typed
+        let v = view(&req("clarify", json!({"allow_other": false, "options": ["Overwrite", "overwrite ", {"label": "Keep both", "value": "keep"},
+            "Save as copy", "Cancel", "Ask later"]})));
+        let opts = v["options"].as_array().unwrap();
+        assert_eq!(opts.len(), MAX_OPTIONS);
+        assert_eq!(opts.iter().filter(|o| o["value"].as_str().unwrap().trim().eq_ignore_ascii_case("overwrite")).count(), 1);
+        assert_eq!(v["free_text"], true, "more than fit: the rest can be typed");
+        let v = view(&req("clarify", json!({"allow_other": false, "options": ["A", "B"]})));
+        assert_eq!(v["free_text"], false);
+        // takeover: minimal steps, then re-read, never replay
+        let v = view(&req("takeover", json!({"steps": ["1", "2", "3", "4", "5", "6", "7"]})));
+        assert_eq!(v["steps"].as_array().unwrap().len(), MAX_STEPS);
+        assert_eq!(v["more_steps"], 2);
+        let n = v["note"].as_str().unwrap();
+        assert!(n.contains("re-reads") && n.contains("will not repeat or replay"), "{n}");
+        // help: what was tried (the gate's list, else the agent log), hint or do it
+        let v = view(&req("help", json!({"client_tried": ["click Save: not executed", "ctrl+s: no effect"]})));
+        assert_eq!((v["tried"].as_array().unwrap().len(), v["tried_source"].as_str()), (2, Some("agent log")));
+        let v = view(&req("help", json!({"tried": ["menu File > Save"], "client_tried": ["x"]})));
+        assert_eq!((v["tried"][0].as_str(), v["tried_source"].as_str()), (Some("menu File > Save"), Some("gate")));
+        assert!(v["choices"].as_str().unwrap().contains("Give a hint") && v["choices"].as_str().unwrap().contains("I did it for you"));
     }
 
     #[test]

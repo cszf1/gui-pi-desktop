@@ -10,7 +10,9 @@
 <div class="muted">No answer in time, a closed question or a cancelled one is "no answer": not a refusal, but the step is not done.</div></fieldset>
 <details id="advanced"><summary>Advanced: optional gate roles</summary>
 <div class="muted">Each role is off unless you turn it on. "Main model" uses the main model's endpoint, model and key;
-"Same as reviewer" uses the reviewer's. A custom endpoint may leave any field empty: empty fields (and a missing key) inherit the main model.</div>
+"Same as reviewer" uses the reviewer's. A custom endpoint may leave any field empty: empty fields (and a missing key) inherit the main model.
+"Off" always wins over any other switch. planner, search and compact also need "in the gate" ticked: their in-gate versions are off by default
+(no measured benefit yet).</div>
 <div id="roles"></div></details>
 <div style="display:flex;gap:8px;margin-top:12px"><button class="primary" id="save">Save</button><span id="saved" class="muted"></span></div>
 <div id="problems" class="problems"></div>

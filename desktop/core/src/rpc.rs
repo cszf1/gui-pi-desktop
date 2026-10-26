@@ -100,6 +100,21 @@ pub const WAITING_MARK: &str = "[gui-pi] waiting for your answer";
 /// What the main window shows while a gate question waits for the person (instead of looking stuck).
 pub const WAITING_TEXT: &str = "等待你回答 - waiting for your answer: a question from the safety gate is open; nothing runs until you answer or it times out.";
 
+/// What the main window shows for a result whose outcome is unknown (gate status unknown).
+pub const UNKNOWN_TEXT: &str = "结果未知 - result unknown: the step may or may not have happened; it is not resent - the agent re-reads first.";
+
+/// A platform condition the extension recognised (details.platform), in the timeline's words.
+pub fn platform_word(p: &str) -> &'static str {
+    match p {
+        "a11y_lost" => "platform: the accessibility bus (AT-SPI / DBus) was lost - actions wait until a window read works again.",
+        "secure_desktop" => "platform: a UAC prompt is up - only you can answer it.",
+        "locked" => "platform: the session is locked - unlock it to let the agent go on.",
+        "no_desktop" => "platform: no interactive desktop (Remote Desktop disconnected?) - reconnect to let the agent go on.",
+        "elevated_target" => "platform: an administrator window - the agent (normal rights) cannot act on it; a person must.",
+        _ => "platform:",
+    }
+}
+
 /// One Pi event -> what the main window shows (None: not shown).
 pub fn ui_event(line: &str) -> Option<UiEvent> {
     let v: Value = serde_json::from_str(line).ok()?;
@@ -120,18 +135,23 @@ pub fn ui_event(line: &str) -> Option<UiEvent> {
             let d = r.get("details").cloned().unwrap_or(json!({}));
             let status = d.get("status").and_then(|s| s.as_str()).map(String::from);
             let human = d.get("human_outcome").and_then(|s| s.as_str()).map(String::from);
-            let gate_kind = matches!(status.as_deref(), Some("blocked") | Some("partial") | Some("unknown") | Some("input_required"))
+            let gate_kind = matches!(status.as_deref(), Some("blocked") | Some("partial") | Some("unknown") | Some("input_required") | Some("done_by_person"))
                 || human.is_some() || first.starts_with("[gate]") || first.starts_with("[human via");
             let mut shown = first.clone();
             match status.as_deref() {
-                Some("unknown") => shown = format!("outcome unknown - the agent must re-read before acting. {first}"),
+                // gate v0.10.3 and older: never shown as done, never resent by the client
+                Some("unknown") => shown = format!("{UNKNOWN_TEXT} {first}"),
                 Some("partial") => {
                     let ran = d.pointer("/steps/ran").and_then(|x| x.as_u64());
                     let total = d.pointer("/steps/total").and_then(|x| x.as_u64());
+                    let not_run: Vec<String> = d.pointer("/steps/notRun").and_then(|x| x.as_array())
+                        .map(|a| a.iter().filter_map(|i| i.as_u64()).map(|i| (i + 1).to_string()).collect()).unwrap_or_default();
                     if let Some(ran) = ran {
-                        shown = format!("batch stopped after {ran}{} steps. {first}", total.map(|t| format!(" of {t}")).unwrap_or_default());
+                        shown = format!("batch stopped after {ran}{} steps{}. {first}", total.map(|t| format!(" of {t}")).unwrap_or_default(),
+                                        if not_run.is_empty() { String::new() } else { format!(" (did not run: {})", not_run.join(", ")) });
                     }
                 }
+                Some("done_by_person") => shown = format!("a person did this step - the agent re-reads and will not repeat it. {first}"),
                 _ => {}
             }
             let choice = d.get("human_choice").and_then(|s| s.as_str()).unwrap_or("");
@@ -154,6 +174,9 @@ pub fn ui_event(line: &str) -> Option<UiEvent> {
                 };
             } else if tier == "write_args" {
                 shown = format!("gate: a read tool may not write files (destination argument refused); nothing was sent. {shown}");
+            }
+            if let Some(p) = d.get("platform").and_then(|x| x.as_str()) {
+                shown = format!("{} {shown}", platform_word(p));
             }
             Some(UiEvent { kind: if gate_kind || tier == "write_args" { "gate".into() } else { "result".into() }, text: shown, image: first_image(c), status, human, ..Default::default() })
         }
@@ -245,7 +268,14 @@ mod tests {
             assert!(ui_event(&line).unwrap().text.contains(w));
         }
         let e = ui_event(r#"{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"x"}],"details":{"status":"unknown"}}}"#).unwrap();
-        assert!(e.kind == "gate" && e.text.starts_with("outcome unknown"));
+        assert!(e.kind == "gate" && e.text.starts_with("结果未知 - result unknown") && e.text.contains("not resent"), "{}", e.text);
+        // gate v0.10.3: the steps that did not run, done by a person, platform conditions
+        let e = ui_event(r#"{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"x"}],"details":{"status":"partial","steps":{"ran":2,"total":4,"completed":[0,2],"notRun":[1,3]}}}}"#).unwrap();
+        assert!(e.text.starts_with("batch stopped after 2 of 4 steps (did not run: 2, 4)"), "{}", e.text);
+        let e = ui_event(r#"{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"x"}],"details":{"status":"done_by_person"}}}"#).unwrap();
+        assert!(e.kind == "gate" && e.text.contains("will not repeat it"));
+        let e = ui_event(r#"{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"x"}],"isError":true,"details":{"status":"blocked","platform":"a11y_lost"}}}"#).unwrap();
+        assert!(e.text.starts_with("platform: the accessibility bus"), "{}", e.text);
         let e = ui_event(r#"{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"x"}],"details":{"status":"partial","steps":{"ran":2,"total":5}}}}"#).unwrap();
         assert!(e.text.starts_with("batch stopped after 2 of 5 steps"));
         let e = ui_event(r#"{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"Clicked"}],"details":{"status":"executed"}}}"#).unwrap();
